@@ -199,7 +199,19 @@ function handleTextMessage(event) {
   const text = event.message.text.trim();
   const state = getState(userId);
   
-  if (!state) return; // Ignore if not in flow
+  if (!state) {
+    // If user is not in a flow, ensure they are registered
+    if (!getUserRole(userId)) {
+      const profile = getProfile(userId);
+      registerUser(userId, profile.displayName || 'Unknown', 'คนสวน');
+    }
+    // Default reply
+    replyMessage(event.replyToken, {
+      type: 'text',
+      text: 'กรุณาเลือกทำรายการจากเมนูด้านล่างครับ 👇'
+    });
+    return;
+  }
   
   if (state.action === 'HARVEST') {
     if (state.step === 'WAIT_QUANTITY') {
