@@ -4,7 +4,7 @@
  * @returns {string} The config value
  */
 function getConfig(key) {
-  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Config');
+  const sheet = getSpreadsheet().getSheetByName('Config');
   const data = sheet.getDataRange().getValues();
   for (let i = 0; i < data.length; i++) {
     if (data[i][0] === key) return data[i][1];
