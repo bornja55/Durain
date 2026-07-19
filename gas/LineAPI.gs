@@ -87,8 +87,12 @@ function getProfile(userId) {
     }
   };
 
-  const response = UrlFetchApp.fetch(url, options);
-  return JSON.parse(response.getContentText());
+  try {
+    const response = UrlFetchApp.fetch(url, options);
+    return JSON.parse(response.getContentText());
+  } catch (err) {
+    throw new Error(`getProfile Error (Token start: "${token ? token.substring(0, 10) : 'null'}...", Length: ${token ? token.length : 0}): ` + err.message);
+  }
 }
 
 /**
