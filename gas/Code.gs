@@ -1,6 +1,6 @@
 function doPost(e) {
   if (!e || !e.postData || !e.postData.contents) {
-    return ContentService.createTextOutput("OK");
+    return HtmlService.createHtmlOutput("OK");
   }
 
   const payload = JSON.parse(e.postData.contents);
@@ -36,7 +36,7 @@ function doPost(e) {
     }
   });
 
-  return ContentService.createTextOutput("OK");
+  return HtmlService.createHtmlOutput("OK");
 }
 
 function doGet(e) {
