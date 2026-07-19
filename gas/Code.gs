@@ -1,48 +1,58 @@
 function doPost(e) {
-  if (!e || !e.postData || !e.postData.contents) {
-    return HtmlService.createHtmlOutput("OK");
-  }
-
-  const payload = JSON.parse(e.postData.contents);
-  const events = payload.events || [];
-  
-  events.forEach(event => {
-    const userId = event.source.userId;
-    
-    if (event.type === 'follow') {
-      handleFollow(event);
-    } else if (event.type === 'postback') {
-      handlePostback(event);
-    } else if (event.type === 'message') {
-      if (event.message.type === 'text') {
-        const text = event.message.text.trim();
-        // Check if it is LIFF QR scan result format: SCAN:flow:treeId
-        if (text.startsWith('SCAN:')) {
-          const parts = text.split(':');
-          if (parts.length >= 3) {
-             const flow = parts[1];
-             const treeId = parts[2];
-             event.postback = { data: `action=SCAN_RESULT&tree=${treeId}&flow=${flow}` };
-             handlePostback(event);
-             return;
-          }
-        }
-        handleTextMessage(event);
-      } else if (event.message.type === 'image') {
-        handleImageMessage(event);
-      } else if (event.message.type === 'location') {
-        handleLocationMessage(event);
-      }
+  try {
+    if (!e || !e.postData || !e.postData.contents) {
+      return HtmlService.createHtmlOutput("OK");
     }
-  });
 
-  return HtmlService.createHtmlOutput("OK");
+    const payload = JSON.parse(e.postData.contents);
+    const events = payload.events || [];
+    
+    events.forEach(event => {
+      const userId = event.source.userId;
+      
+      if (event.type === 'follow') {
+        handleFollow(event);
+      } else if (event.type === 'postback') {
+        handlePostback(event);
+      } else if (event.type === 'message') {
+        if (event.message.type === 'text') {
+          const text = event.message.text.trim();
+          // Check if it is LIFF QR scan result format: SCAN:flow:treeId
+          if (text.startsWith('SCAN:')) {
+            const parts = text.split(':');
+            if (parts.length >= 3) {
+               const flow = parts[1];
+               const treeId = parts[2];
+               event.postback = { data: `action=SCAN_RESULT&tree=${treeId}&flow=${flow}` };
+               handlePostback(event);
+               return;
+            }
+          }
+          handleTextMessage(event);
+        } else if (event.message.type === 'image') {
+          handleImageMessage(event);
+        } else if (event.message.type === 'location') {
+          handleLocationMessage(event);
+        }
+      }
+    });
+
+    return HtmlService.createHtmlOutput("OK");
+  } catch (err) {
+    try {
+      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
+      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), err.toString(), err.stack]);
+    } catch (e2) {}
+    return HtmlService.createHtmlOutput("Error");
+  }
 }
 
 function doGet(e) {
-  const page = e.parameter.page || 'scanner';
-  
-  if (page === 'dashboard') {
+  try {
+    const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'scanner';
+    
+    if (page === 'dashboard') {
     // Return Dashboard Web App
     const template = HtmlService.createTemplateFromFile('Dashboard');
     template.liffId = getConfig('LIFF_ID');
@@ -56,6 +66,14 @@ function doGet(e) {
     return template.evaluate()
       .setTitle('สแกน QR ต้นทุเรียน')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+    }
+  } catch (err) {
+    try {
+      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
+      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), err.toString(), err.stack]);
+    } catch (e2) {}
+    return HtmlService.createHtmlOutput("Error: " + err.toString());
   }
 }
 
