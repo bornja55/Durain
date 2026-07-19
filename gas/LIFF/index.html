@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>สแกน QR Code ต้นทุเรียน</title>
+    <style>
+        :root {
+            --primary-color: #2E7D32; /* Green farm theme */
+            --bg-color: #F1F8E9;
+            --text-color: #333333;
+            --error-color: #D32F2F;
+        }
+        body {
+            font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text-color);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .container {
+            background-color: white;
+            padding: 30px 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+            width: 100%;
+            max-width: 400px;
+        }
+        h1 {
+            color: var(--primary-color);
+            font-size: 24px;
+            margin-top: 0;
+            margin-bottom: 20px;
+        }
+        #status {
+            font-size: 16px;
+            margin-bottom: 20px;
+            color: #555;
+        }
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 15px 30px;
+            font-size: 18px;
+            border-radius: 8px;
+            cursor: pointer;
+            width: 100%;
+            font-weight: bold;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
+            transition: background-color 0.3s;
+        }
+        button:active {
+            background-color: #1B5E20;
+        }
+        button:disabled {
+            background-color: #9E9E9E;
+            cursor: not-allowed;
+        }
+        #errorMsg {
+            color: var(--error-color);
+            margin-top: 15px;
+            font-size: 14px;
+            display: none;
+            padding: 10px;
+            background-color: #FFEBEE;
+            border-radius: 4px;
+        }
+        .loader {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--primary-color);
+            border-radius: 50%;
+            width: 30px;
+            height: 30px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+</head>
+<body>
+
+    <div class="container">
+        <h1>🌳 สแกน QR ต้นทุเรียน</h1>
+        
+        <div id="loading" class="loader"></div>
+        <p id="status">กำลังโหลดระบบ...</p>
+        
+        <button id="scanBtn" onclick="scanQR()" style="display:none;">📷 เปิดกล้องสแกน</button>
+        
+        <div id="errorMsg"></div>
+    </div>
+
+    <!-- LIFF SDK -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+        // กำหนด LIFF ID ของคุณที่นี่ หรือดึงจาก GAS template
+        const LIFF_ID = "<?= liffId ?>"; 
+        
+        let currentFlow = 'unknown';
+
+        window.onload = function() {
+            // อ่านค่า URL Parameter 'flow'
+            const urlParams = new URLSearchParams(window.location.search);
+            currentFlow = urlParams.get('flow') || 'unknown';
+            
+            initializeLiff();
+        };
+
+        function showError(message) {
+            const errorDiv = document.getElementById('errorMsg');
+            errorDiv.textContent = message;
+            errorDiv.style.display = 'block';
+            document.getElementById('loading').style.display = 'none';
+        }
+
+        async function initializeLiff() {
+            try {
+                await liff.init({ liffId: LIFF_ID });
+                
+                if (!liff.isLoggedIn()) {
+                    liff.login();
+                    return;
+                }
+
+                // Check if user is in LINE Client
+                if (!liff.isInClient()) {
+                    showError("กรุณาเปิดลิงก์นี้ผ่านแอปพลิเคชัน LINE เท่านั้น");
+                    document.getElementById('status').textContent = "ระบบไม่รองรับเบราว์เซอร์ภายนอก";
+                    return;
+                }
+
+                // Ready to scan
+                document.getElementById('loading').style.display = 'none';
+                document.getElementById('status').textContent = "ระบบพร้อมใช้งาน กดปุ่มด้านล่างเพื่อสแกน";
+                document.getElementById('scanBtn').style.display = 'block';
+
+            } catch (err) {
+                console.error('LIFF Initialization failed ', err);
+                showError("เกิดข้อผิดพลาดในการโหลด LIFF: " + err.message);
+            }
+        }
+
+        async function scanQR() {
+            const scanBtn = document.getElementById('scanBtn');
+            scanBtn.disabled = true;
+            scanBtn.textContent = "กำลังเปิดกล้อง...";
+            document.getElementById('errorMsg').style.display = 'none';
+
+            try {
+                if (liff.scanCodeV2) {
+                    const result = await liff.scanCodeV2();
+                    
+                    if (result && result.value) {
+                        processQRData(result.value);
+                    } else {
+                        scanBtn.disabled = false;
+                        scanBtn.textContent = "📷 เปิดกล้องสแกน";
+                    }
+                } else {
+                    showError("อุปกรณ์ของคุณไม่รองรับฟีเจอร์สแกน QR Code ผ่าน LIFF (กรุณาอัปเดตแอป LINE)");
+                    scanBtn.disabled = false;
+                    scanBtn.textContent = "📷 เปิดกล้องสแกน";
+                }
+            } catch (err) {
+                console.error("Scan error", err);
+                showError("ไม่สามารถเปิดกล้องได้: " + err.message);
+                scanBtn.disabled = false;
+                scanBtn.textContent = "📷 เปิดกล้องสแกน";
+            }
+        }
+
+        async function processQRData(qrUrl) {
+            try {
+                document.getElementById('status').textContent = "กำลังประมวลผลข้อมูล...";
+                
+                // รูปแบบ QR: https://liff.line.me/{LIFF_ID}?tree={TREE_ID}
+                const parsedUrl = new URL(qrUrl);
+                const treeId = parsedUrl.searchParams.get('tree');
+
+                if (!treeId) {
+                    throw new Error("ไม่พบข้อมูลรหัสต้นไม้ (tree) ใน QR Code");
+                }
+
+                const messageText = `SCAN:${currentFlow}:${treeId}`;
+
+                await liff.sendMessages([
+                    {
+                        type: 'text',
+                        text: messageText
+                    }
+                ]);
+
+                document.getElementById('status').textContent = "ส่งข้อมูลสำเร็จ กำลังปิดหน้าต่าง...";
+                
+                setTimeout(() => {
+                    liff.closeWindow();
+                }, 1000);
+
+            } catch (err) {
+                console.error("Processing error", err);
+                showError("ข้อผิดพลาด: " + err.message);
+                
+                const scanBtn = document.getElementById('scanBtn');
+                scanBtn.disabled = false;
+                scanBtn.textContent = "📷 สแกนใหม่อีกครั้ง";
+            }
+        }
+    </script>
+</body>
+</html>

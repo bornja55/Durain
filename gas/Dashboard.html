@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>ระบบจัดการสวนทุเรียน</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
+  <?!= HtmlService.createHtmlOutputFromFile('Dashboard.css').getContent(); ?>
+</head>
+<body>
+
+  <div id="loading" class="full-screen-center">
+    <div class="loader"></div>
+    <p id="loadingText">กำลังตรวจสอบสิทธิ์เข้าใช้งาน...</p>
+  </div>
+
+  <div id="unauthorized" class="full-screen-center hidden">
+    <h2>⛔ ไม่มีสิทธิ์เข้าถึง</h2>
+    <p>ระบบนี้สำหรับเจ้าของสวนหรือแอดมินเท่านั้น</p>
+  </div>
+
+  <div id="app" class="hidden">
+    <header>
+      <div class="brand">
+        🐰🍈 บ้านสวนโพรงกระต่าย
+      </div>
+      <div class="user-info">
+        <img id="userImg" src="" alt="Profile">
+        <span id="userName">User</span>
+      </div>
+    </header>
+
+    <nav class="tabs">
+      <button class="tab-btn active" onclick="switchTab('overview')">📊 ภาพรวม</button>
+      <button class="tab-btn" onclick="switchTab('map')">🗺️ แผนที่</button>
+      <button class="tab-btn" onclick="switchTab('pending')">✅ รออนุมัติ <span id="pendingBadge" class="badge">0</span></button>
+      <button class="tab-btn" onclick="switchTab('users')">👥 จัดการผู้ใช้</button>
+    </nav>
+
+    <main>
+      <!-- Tab: ภาพรวม -->
+      <section id="tab-overview" class="tab-content active">
+        <div class="summary-cards">
+          <div class="card">
+            <h3>ต้นทุเรียนทั้งหมด</h3>
+            <div class="value" id="valTotalTrees">0</div>
+          </div>
+          <div class="card">
+            <h3>รออนุมัติ</h3>
+            <div class="value text-warning" id="valPendingCount">0</div>
+          </div>
+        </div>
+        <div class="chart-container card">
+          <h3>ผลผลิตตามสายพันธุ์</h3>
+          <canvas id="varietyChart"></canvas>
+        </div>
+      </section>
+
+      <!-- Tab: แผนที่ -->
+      <section id="tab-map" class="tab-content hidden">
+        <div class="card">
+          <p>ฟีเจอร์แผนที่สวนทุเรียน (Coming Soon)</p>
+        </div>
+      </section>
+
+      <!-- Tab: รออนุมัติ -->
+      <section id="tab-pending" class="tab-content hidden">
+        <div id="pendingList" class="list-container">
+           <!-- Items go here -->
+        </div>
+      </section>
+
+      <!-- Tab: จัดการผู้ใช้ -->
+      <section id="tab-users" class="tab-content hidden">
+        <div class="card">
+          <table class="user-table">
+            <thead>
+              <tr>
+                <th>ชื่อ</th>
+                <th>บทบาท</th>
+                <th>จัดการ</th>
+              </tr>
+            </thead>
+            <tbody id="userTableBody">
+              <!-- Users go here -->
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Scripts -->
+  <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <script>
+    const LIFF_ID = "<?= liffId ?>";
+  </script>
+  <?!= HtmlService.createHtmlOutputFromFile('Dashboard.js').getContent(); ?>
+</body>
+</html>

@@ -1,0 +1,192 @@
+<script>
+let currentUser = null;
+let varietyChartInstance = null;
+
+window.onload = async function() {
+  try {
+    await liff.init({ liffId: LIFF_ID });
+    if (!liff.isLoggedIn()) {
+      liff.login();
+      return;
+    }
+
+    const profile = await liff.getProfile();
+    document.getElementById('userName').textContent = profile.displayName;
+    document.getElementById('userImg').src = profile.pictureUrl || 'https://via.placeholder.com/32';
+    
+    // Verify Access
+    google.script.run
+      .withSuccessHandler(onAccessSuccess)
+      .withFailureHandler(onAccessError)
+      .checkUserAccessWeb(profile.userId);
+
+  } catch (err) {
+    document.getElementById('loadingText').textContent = "ข้อผิดพลาด: " + err.message;
+  }
+};
+
+function onAccessSuccess(response) {
+  if (response.hasAccess) {
+    currentUser = response.user;
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('app').classList.remove('hidden');
+    loadDashboardData();
+  } else {
+    document.getElementById('loading').classList.add('hidden');
+    document.getElementById('unauthorized').classList.remove('hidden');
+  }
+}
+
+function onAccessError(err) {
+  document.getElementById('loadingText').textContent = "เกิดข้อผิดพลาดในการตรวจสอบสิทธิ์";
+  console.error(err);
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  
+  document.getElementById('tab-' + tabId).classList.remove('hidden');
+  document.querySelector(`button[onclick="switchTab('${tabId}')"]`).classList.add('active');
+  
+  if (tabId === 'pending') loadPendingItems();
+  if (tabId === 'users') loadUsers();
+}
+
+// -----------------------------------------------------
+// Overview Dashboard
+// -----------------------------------------------------
+function loadDashboardData() {
+  google.script.run
+    .withSuccessHandler(renderDashboard)
+    .getDashboardDataWeb(currentUser.userId);
+}
+
+function renderDashboard(data) {
+  document.getElementById('valTotalTrees').textContent = data.totalTrees;
+  document.getElementById('valPendingCount').textContent = data.pendingCount;
+  document.getElementById('pendingBadge').textContent = data.pendingCount;
+  
+  // Render Chart
+  const ctx = document.getElementById('varietyChart').getContext('2d');
+  if (varietyChartInstance) varietyChartInstance.destroy();
+  
+  const labels = Object.keys(data.variety);
+  const values = Object.values(data.variety);
+  
+  varietyChartInstance = new Chart(ctx, {
+    type: 'pie',
+    data: {
+      labels: labels,
+      datasets: [{
+        data: values,
+        backgroundColor: ['#7CB342', '#F9A825', '#A1887F', '#4DD0E1', '#FF8A65']
+      }]
+    },
+    options: {
+      responsive: true,
+      maintainAspectRatio: false
+    }
+  });
+}
+
+// -----------------------------------------------------
+// Pending Items
+// -----------------------------------------------------
+function loadPendingItems() {
+  document.getElementById('pendingList').innerHTML = '<p>กำลังโหลด...</p>';
+  google.script.run
+    .withSuccessHandler(renderPendingItems)
+    .getPendingItemsWeb(currentUser.userId);
+}
+
+function renderPendingItems(items) {
+  const list = document.getElementById('pendingList');
+  if (items.length === 0) {
+    list.innerHTML = '<p>ไม่มีรายการรออนุมัติ</p>';
+    return;
+  }
+  
+  let html = '';
+  items.forEach(item => {
+    let details = `ต้น: ${item.treeId} | รอกระทำ: ${item.type}`;
+    if (item.type === 'ตัดจำหน่าย') {
+       details += `<br>ตัดขาย ${item.data.quantity} ลูก | ราคา ${item.data.price} บ/กก.`;
+    }
+    
+    html += `
+      <div class="list-item" id="item-${item.id}">
+        <div class="list-item-info">
+          <h4>รายการ #${item.id}</h4>
+          <p>${details}</p>
+          <p>โดย: ${item.recorderName} (${new Date(item.date).toLocaleDateString('th-TH')})</p>
+        </div>
+        <div class="actions-col">
+          <button class="btn-approve" onclick="approveItem(${item.id})">อนุมัติ</button>
+          <button class="btn-reject" onclick="rejectItem(${item.id})">ปฏิเสธ</button>
+        </div>
+      </div>
+    `;
+  });
+  list.innerHTML = html;
+}
+
+function approveItem(id) {
+  if(!confirm('ยืนยันการอนุมัติ?')) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      document.getElementById('item-' + id).remove();
+      loadDashboardData(); // update counts
+    })
+    .approvePendingItemWeb(id, currentUser.userId);
+}
+
+function rejectItem(id) {
+  const reason = prompt('กรุณาระบุเหตุผลการปฏิเสธ:');
+  if(reason === null) return;
+  google.script.run
+    .withSuccessHandler(() => {
+      document.getElementById('item-' + id).remove();
+      loadDashboardData(); // update counts
+    })
+    .rejectPendingItemWeb(id, reason, currentUser.userId);
+}
+
+// -----------------------------------------------------
+// Users Management
+// -----------------------------------------------------
+function loadUsers() {
+  document.getElementById('userTableBody').innerHTML = '<tr><td colspan="3">กำลังโหลด...</td></tr>';
+  google.script.run
+    .withSuccessHandler(renderUsers)
+    .getUsersWeb(currentUser.userId);
+}
+
+function renderUsers(users) {
+  const tbody = document.getElementById('userTableBody');
+  let html = '';
+  users.forEach(u => {
+    const isSelf = u.userId === currentUser.userId;
+    html += `
+      <tr>
+        <td>${u.name}</td>
+        <td>
+          <select onchange="changeRole('${u.userId}', this.value)" ${isSelf ? 'disabled' : ''}>
+            <option value="คนสวน" ${u.role === 'คนสวน' ? 'selected' : ''}>คนสวน</option>
+            <option value="เจ้าของ" ${u.role === 'เจ้าของ' ? 'selected' : ''}>เจ้าของ</option>
+            <option value="admin" ${u.role === 'admin' ? 'selected' : ''}>admin</option>
+          </select>
+        </td>
+        <td>${isSelf ? '(คุณ)' : ''}</td>
+      </tr>
+    `;
+  });
+  tbody.innerHTML = html;
+}
+
+function changeRole(targetId, newRole) {
+  google.script.run
+    .withSuccessHandler(() => alert('เปลี่ยนสิทธิ์เรียบร้อย'))
+    .updateUserRoleWeb(targetId, newRole, currentUser.userId);
+}
+</script>
