@@ -7,7 +7,10 @@ function getConfig(key) {
   const sheet = getSpreadsheet().getSheetByName('Config');
   const data = sheet.getDataRange().getValues();
   for (let i = 0; i < data.length; i++) {
-    if (data[i][0] === key) return data[i][1];
+    const rowKey = data[i][0] ? data[i][0].toString().trim() : '';
+    if (rowKey === key) {
+      return data[i][1] ? data[i][1].toString().trim() : null;
+    }
   }
   return null;
 }
