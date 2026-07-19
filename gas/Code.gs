@@ -3,7 +3,8 @@ function doPost(e) {
     return ContentService.createTextOutput("OK");
   }
 
-  const events = JSON.parse(e.postData.contents).events;
+  const payload = JSON.parse(e.postData.contents);
+  const events = payload.events || [];
   
   events.forEach(event => {
     const userId = event.source.userId;
