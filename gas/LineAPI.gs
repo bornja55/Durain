@@ -19,7 +19,7 @@ function getConfig(key) {
  */
 function replyMessage(replyToken, messages) {
   const url = 'https://api.line.me/v2/bot/message/reply';
-  const token = getConfig('LINE_CHANNEL_TOKEN');
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
   
   if (!Array.isArray(messages)) {
     messages = [messages];
@@ -47,7 +47,7 @@ function replyMessage(replyToken, messages) {
  */
 function pushMessage(userId, messages) {
   const url = 'https://api.line.me/v2/bot/message/push';
-  const token = getConfig('LINE_CHANNEL_TOKEN');
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
   
   if (!Array.isArray(messages)) {
     messages = [messages];
@@ -75,7 +75,7 @@ function pushMessage(userId, messages) {
  */
 function getProfile(userId) {
   const url = `https://api.line.me/v2/bot/profile/${userId}`;
-  const token = getConfig('LINE_CHANNEL_TOKEN');
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
   
   const options = {
     method: 'get',
@@ -95,7 +95,7 @@ function getProfile(userId) {
  */
 function getContent(messageId) {
   const url = `https://api-data.line.me/v2/bot/message/${messageId}/content`;
-  const token = getConfig('LINE_CHANNEL_TOKEN');
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
   
   const options = {
     method: 'get',
@@ -115,7 +115,7 @@ function getContent(messageId) {
  */
 function linkRichMenuToUser(userId, richMenuId) {
   const url = `https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`;
-  const token = getConfig('LINE_CHANNEL_TOKEN');
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
   
   const options = {
     method: 'post',
