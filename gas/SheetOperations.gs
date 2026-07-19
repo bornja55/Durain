@@ -1,13 +1,12 @@
-const SPREADSHEET_ID = 'ใส่_ID_ของ_Google_Sheet_ที่นี่'; // ⚠️ นำ ID ของ Google Sheet มาใส่ในเครื่องหมายคำพูดนี้
-
 let cachedSpreadsheet = null;
 
 function getSpreadsheet() {
   if (!cachedSpreadsheet) {
-    if (SPREADSHEET_ID === 'ใส่_ID_ของ_Google_Sheet_ที่นี่') {
-       throw new Error("คุณยังไม่ได้ใส่ SPREADSHEET_ID ในไฟล์ SheetOperations.gs");
+    const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    if (!spreadsheetId) {
+       throw new Error("คุณยังไม่ได้ตั้งค่า SPREADSHEET_ID ใน Script Properties (Project Settings)");
     }
-    cachedSpreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    cachedSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
   }
   return cachedSpreadsheet;
 }
