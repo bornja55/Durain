@@ -621,7 +621,15 @@ function updateTreeWeb(treeData, userId) {
       sheet.getRange(i+1, 6).setValue(treeData.flowerMonth || '');
       let photoUrlToSave = treeData.photoUrl || '';
       if (photoUrlToSave.startsWith('data:image/')) {
-        photoUrlToSave = uploadBase64PhotoToDrive(photoUrlToSave, `tree_${treeData.id}_${new Date().getTime()}.jpg`);
+        const d = new Date();
+        const dd = String(d.getDate()).padStart(2, '0');
+        const mm = String(d.getMonth() + 1).padStart(2, '0');
+        const yyyy = d.getFullYear() + 543;
+        const hh = String(d.getHours()).padStart(2, '0');
+        const min = String(d.getMinutes()).padStart(2, '0');
+        const ss = String(d.getSeconds()).padStart(2, '0');
+        const fileName = `${treeData.id}_${dd}${mm}${yyyy}_${hh}${min}${ss}.jpg`;
+        photoUrlToSave = uploadBase64PhotoToDrive(photoUrlToSave, fileName);
       }
       sheet.getRange(i+1, 11).setValue(photoUrlToSave);
       

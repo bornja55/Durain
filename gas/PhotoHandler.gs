@@ -13,25 +13,16 @@ function getOrCreateFolder(parentId, folderName) {
   return parentFolder.createFolder(folderName);
 }
 
-function generatePhotoFilename(targetFolder) {
+function generatePhotoFilename(treeId) {
   const d = new Date();
-  const yy = String(d.getFullYear() % 100).padStart(2, '0');
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
   const dd = String(d.getDate()).padStart(2, '0');
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const yyyy = d.getFullYear() + 543;
   const hh = String(d.getHours()).padStart(2, '0');
-  const m = String(d.getMinutes()).padStart(2, '0');
-  const prefix = `${yy}${mm}${dd}_${hh}${m}_`;
+  const min = String(d.getMinutes()).padStart(2, '0');
+  const ss = String(d.getSeconds()).padStart(2, '0');
   
-  let count = 0;
-  if (targetFolder) {
-    const files = targetFolder.searchFiles(`title contains '${prefix}'`);
-    while (files.hasNext()) {
-      files.next();
-      count++;
-    }
-  }
-  const xx = String(count).padStart(2, '0');
-  return `${prefix}${xx}.jpg`;
+  return `${treeId}_${dd}${mm}${yyyy}_${hh}${min}${ss}.jpg`;
 }
 
 function savePhotoToDrive(messageId, seasonId, treeId) {
@@ -45,7 +36,7 @@ function savePhotoToDrive(messageId, seasonId, treeId) {
   if (!blob) return null;
   
   const file = treeFolder.createFile(blob);
-  file.setName(generatePhotoFilename(treeFolder));
+  file.setName(generatePhotoFilename(treeId));
   try {
     file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
   } catch (e) {
