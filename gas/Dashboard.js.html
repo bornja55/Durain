@@ -1,641 +1,650 @@
 <script>
-console.log("Dashboard.js loaded successfully. Version: " + new Date().getTime());
-let currentUser = null;
-let varietyChartInstance = null;
-let yoyChartInstance = null;
+  console.log("Dashboard.js loaded successfully. Version: " + new Date().getTime());
+  let currentUser = null;
+  let varietyChartInstance = null;
+  let yoyChartInstance = null;
 
-window.onload = function() {
-  const savedUserId = localStorage.getItem('adminUserId');
-  if (savedUserId) {
-    document.getElementById('login').classList.add('hidden');
-    verifyAccess(savedUserId);
-  }
-};
+  window.onload = function () {
+    const savedUserId = localStorage.getItem('adminUserId');
+    if (savedUserId) {
+      document.getElementById('login').classList.add('hidden');
+      verifyAccess(savedUserId);
+    }
+  };
 
-function handleLogin() {
-  alert("Button clicked!");
-  const pin = document.getElementById('pinInput').value;
-  if (!pin) return;
-  
-  document.getElementById('loginError').textContent = "กำลังตรวจสอบ...";
-  
-  google.script.run
-    .withSuccessHandler((res) => {
-      if (res.success) {
-        localStorage.setItem('adminUserId', res.userId);
-        document.getElementById('login').classList.add('hidden');
-        verifyAccess(res.userId);
-      } else {
-        document.getElementById('loginError').textContent = "รหัส PIN ไม่ถูกต้อง";
-      }
-    })
-    .withFailureHandler((err) => {
-      document.getElementById('loginError').textContent = "ข้อผิดพลาด: " + err.message;
-    })
-    .loginWithPinWeb(pin);
-}
+  function handleLogin() {
+    alert("Button clicked!");
+    const pin = document.getElementById('pinInput').value;
+    if (!pin) return;
 
-function verifyAccess(uid) {
-  document.getElementById('loading').classList.remove('hidden');
-  google.script.run
-    .withSuccessHandler(onAccessSuccess)
-    .withFailureHandler((err) => {
-      document.getElementById('loading').classList.add('hidden');
-      alert("Error: " + err.message);
-    })
-    .checkUserAccessWeb(uid);
-}
+    document.getElementById('loginError').textContent = "กำลังตรวจสอบ...";
 
-function onAccessSuccess(response) {
-  if (response.hasAccess) {
-    currentUser = response.user;
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('app').classList.remove('hidden');
-    document.getElementById('userName').textContent = currentUser.name;
-    loadDashboardData();
-  } else {
-    document.getElementById('loading').classList.add('hidden');
-    document.getElementById('unauthorized').classList.remove('hidden');
-  }
-}
-
-function onAccessError(err) {
-  document.getElementById('loading').classList.add('hidden');
-  alert("เกิดข้อผิดพลาด: " + err.message);
-}
-
-function switchTab(tabId, btn) {
-  document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
-  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
-  
-  document.getElementById('tab-' + tabId).classList.remove('hidden');
-  if (btn) {
-    btn.classList.add('active');
-  } else {
-    const targetBtn = document.querySelector(`button[onclick*="switchTab('${tabId}'"]`);
-    if (targetBtn) targetBtn.classList.add('active');
-  }
-  
-  if (tabId === 'pending') loadPendingItems();
-  if (tabId === 'users') loadUsers();
-  if (tabId === 'trees') loadTrees();
-  if (tabId === 'income') loadIncomeData();
-  if (tabId === 'map') {
-    initMap();
-    setTimeout(() => { 
-      if (map) {
-        map.invalidateSize(); 
-        loadMapMarkers(); 
-      }
-    }, 100);
-  }
-}
-
-// -----------------------------------------------------
-// Overview Dashboard
-// -----------------------------------------------------
-function loadDashboardData() {
-  google.script.run
-    .withSuccessHandler(renderDashboard)
-    .getDashboardDataWeb(currentUser.userId);
-}
-
-function openSeasonModal() {
-  const currentSeason = document.getElementById('currentSeasonDisplay').textContent;
-  const newSeason = prompt("กรุณาระบุปีฤดูกาลใหม่ (เช่น 2568, 2569)\n*ระบบจะตั้งเป็นฤดูกาลปัจจุบันและเปิดใช้งานอัตโนมัติ", currentSeason !== '-' ? currentSeason : '');
-  
-  if (newSeason && newSeason.trim() !== '' && newSeason.trim() !== currentSeason) {
-    document.getElementById('currentSeasonDisplay').textContent = 'กำลังเปลี่ยน...';
     google.script.run
       .withSuccessHandler((res) => {
-        if(res.success) {
-          alert('เปลี่ยนฤดูกาลสำเร็จ ข้อมูลทั้งหมดจะรีเฟรชเป็นฤดูกาลใหม่');
-          location.reload();
+        if (res.success) {
+          localStorage.setItem('adminUserId', res.userId);
+          document.getElementById('login').classList.add('hidden');
+          verifyAccess(res.userId);
+        } else {
+          document.getElementById('loginError').textContent = "รหัส PIN ไม่ถูกต้อง";
         }
       })
-      .withFailureHandler(err => {
-        alert(err.message);
-        loadDashboardData();
+      .withFailureHandler((err) => {
+        document.getElementById('loginError').textContent = "ข้อผิดพลาด: " + err.message;
       })
-      .changeActiveSeasonWeb(newSeason.trim(), currentUser.userId);
+      .loginWithPinWeb(pin);
   }
-}
 
-function renderDashboard(data) {
-  document.getElementById('valTotalTrees').textContent = data.totalTrees.toLocaleString();
-  document.getElementById('valPendingCount').textContent = data.pendingCount.toLocaleString();
-  document.getElementById('pendingBadge').textContent = data.pendingCount;
-  
-  if (currentUser && (currentUser.role === 'เจ้าของ' || currentUser.role === 'admin')) {
-    const seasonCard = document.getElementById('seasonManagementCard');
-    if (seasonCard) {
-      seasonCard.classList.remove('hidden');
-      document.getElementById('currentSeasonDisplay').textContent = data.activeSeason || '-';
+  function verifyAccess(uid) {
+    document.getElementById('loading').classList.remove('hidden');
+    google.script.run
+      .withSuccessHandler(onAccessSuccess)
+      .withFailureHandler((err) => {
+        document.getElementById('loading').classList.add('hidden');
+        alert("Error: " + err.message);
+      })
+      .checkUserAccessWeb(uid);
+  }
+
+  function onAccessSuccess(response) {
+    if (response.hasAccess) {
+      currentUser = response.user;
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('app').classList.remove('hidden');
+      document.getElementById('userName').textContent = currentUser.name;
+      loadDashboardData();
+    } else {
+      document.getElementById('loading').classList.add('hidden');
+      document.getElementById('unauthorized').classList.remove('hidden');
     }
   }
-  
-  // Render Chart
-  const ctx = document.getElementById('varietyChart').getContext('2d');
-  if (varietyChartInstance) varietyChartInstance.destroy();
-  
-  const labels = Object.keys(data.variety);
-  const values = Object.values(data.variety);
-  
-  varietyChartInstance = new Chart(ctx, {
-    type: 'pie',
-    data: {
-      labels: labels,
-      datasets: [{
-        data: values,
-        backgroundColor: ['#7CB342', '#F9A825', '#A1887F', '#4DD0E1', '#FF8A65']
-      }]
-    },
-    options: {
-      responsive: true,
-      maintainAspectRatio: false
-    }
-  });
 
-  // Render YoY Chart
-  const ctxYoy = document.getElementById('yoyChart').getContext('2d');
-  if (yoyChartInstance) yoyChartInstance.destroy();
-  
-  if (data.yoy) {
-    const yoyLabels = Object.keys(data.yoy).sort();
-    const yoyValues = yoyLabels.map(k => data.yoy[k]);
-    
-    yoyChartInstance = new Chart(ctxYoy, {
-      type: 'bar',
+  function onAccessError(err) {
+    document.getElementById('loading').classList.add('hidden');
+    alert("เกิดข้อผิดพลาด: " + err.message);
+  }
+
+  function switchTab(tabId, btn) {
+    document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+    document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+    document.getElementById('tab-' + tabId).classList.remove('hidden');
+    if (btn) {
+      btn.classList.add('active');
+    } else {
+      const targetBtn = document.querySelector(`button[onclick*="switchTab('${tabId}'"]`);
+      if (targetBtn) targetBtn.classList.add('active');
+    }
+
+    if (tabId === 'pending') loadPendingItems();
+    if (tabId === 'users') loadUsers();
+    if (tabId === 'trees') loadTrees();
+    if (tabId === 'income') loadIncomeData();
+    if (tabId === 'map') {
+      initMap();
+      setTimeout(() => {
+        if (map) {
+          map.invalidateSize();
+          loadMapMarkers();
+        }
+      }, 100);
+    }
+  }
+
+  // -----------------------------------------------------
+  // Overview Dashboard
+  // -----------------------------------------------------
+  function loadDashboardData() {
+    google.script.run
+      .withSuccessHandler(renderDashboard)
+      .getDashboardDataWeb(currentUser.userId);
+  }
+
+  function openSeasonModal() {
+    const currentSeason = document.getElementById('currentSeasonDisplay').textContent;
+    const newSeason = prompt("กรุณาระบุปีฤดูกาลใหม่ (เช่น 2568, 2569)\n*ระบบจะตั้งเป็นฤดูกาลปัจจุบันและเปิดใช้งานอัตโนมัติ", currentSeason !== '-' ? currentSeason : '');
+
+    if (newSeason && newSeason.trim() !== '' && newSeason.trim() !== currentSeason) {
+      document.getElementById('currentSeasonDisplay').textContent = 'กำลังเปลี่ยน...';
+      google.script.run
+        .withSuccessHandler((res) => {
+          if (res.success) {
+            alert('เปลี่ยนฤดูกาลสำเร็จ ข้อมูลทั้งหมดจะรีเฟรชเป็นฤดูกาลใหม่');
+            location.reload();
+          }
+        })
+        .withFailureHandler(err => {
+          alert(err.message);
+          loadDashboardData();
+        })
+        .changeActiveSeasonWeb(newSeason.trim(), currentUser.userId);
+    }
+  }
+
+  function renderDashboard(data) {
+    document.getElementById('valTotalTrees').textContent = data.totalTrees.toLocaleString();
+    document.getElementById('valPendingCount').textContent = data.pendingCount.toLocaleString();
+    document.getElementById('pendingBadge').textContent = data.pendingCount;
+
+    if (currentUser && (currentUser.role === 'เจ้าของ' || currentUser.role === 'admin')) {
+      const seasonCard = document.getElementById('seasonManagementCard');
+      if (seasonCard) {
+        seasonCard.classList.remove('hidden');
+        document.getElementById('currentSeasonDisplay').textContent = data.activeSeason || '-';
+      }
+    }
+
+    // Render Chart
+    const ctx = document.getElementById('varietyChart').getContext('2d');
+    if (varietyChartInstance) varietyChartInstance.destroy();
+
+    const labels = Object.keys(data.variety);
+    const values = Object.values(data.variety);
+
+    varietyChartInstance = new Chart(ctx, {
+      type: 'pie',
       data: {
-        labels: yoyLabels,
+        labels: labels,
         datasets: [{
-          label: 'จำนวนผลผลิตที่ตัดขาย (ลูก)',
-          data: yoyValues,
-          backgroundColor: '#4caf50',
-          borderRadius: 4
+          data: values,
+          backgroundColor: ['#7CB342', '#F9A825', '#A1887F', '#4DD0E1', '#FF8A65']
         }]
       },
       options: {
         responsive: true,
-        maintainAspectRatio: false,
-        scales: {
-          y: { beginAtZero: true }
+        maintainAspectRatio: false
+      }
+    });
+
+    // Render YoY Chart
+    const ctxYoy = document.getElementById('yoyChart').getContext('2d');
+    if (yoyChartInstance) yoyChartInstance.destroy();
+
+    if (data.yoy) {
+      const yoyLabels = Object.keys(data.yoy).sort();
+      const yoyValues = yoyLabels.map(k => data.yoy[k]);
+
+      yoyChartInstance = new Chart(ctxYoy, {
+        type: 'bar',
+        data: {
+          labels: yoyLabels,
+          datasets: [{
+            label: 'จำนวนผลผลิตที่ตัดขาย (ลูก)',
+            data: yoyValues,
+            backgroundColor: '#4caf50',
+            borderRadius: 4
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          scales: {
+            y: { beginAtZero: true }
+          }
+        }
+      });
+    }
+  }
+
+  // -----------------------------------------------------
+  // Pending Items
+  // -----------------------------------------------------
+  function loadPendingItems() {
+    document.getElementById('pendingList').innerHTML = '\x3Cp\x3Eกำลังโหลด...\x3C/p\x3E';
+    google.script.run
+      .withSuccessHandler(renderPendingItems)
+      .withFailureHandler((err) => {
+        document.getElementById('pendingList').innerHTML = '\x3Cp style="color:red"\x3Eเกิดข้อผิดพลาด: ' + err.message + '\x3C/p\x3E';
+      })
+      .getPendingItemsWeb(currentUser.userId);
+  }
+
+  function renderPendingItems(items) {
+    const list = document.getElementById('pendingList');
+    if (items.length === 0) {
+      list.innerHTML = '\x3Cp\x3Eไม่มีรายการรออนุมัติ\x3C/p\x3E';
+      return;
+    }
+
+    let html = '';
+    items.forEach(item => {
+      let details = 'ต้น: ' + item.treeId + ' | รอกระทำ: ' + item.type;
+      if (item.type === 'ขาย' && item.data) {
+        details += '\x3Cbr\x3Eตัดขาย ' + item.data.quantity + ' ลูก | ราคา ' + item.data.price + ' บ/กก.';
+      }
+
+      let dateText = '-';
+      if (item.date) {
+        try {
+          const d = new Date(item.date);
+          if (!isNaN(d.getTime())) dateText = d.toLocaleDateString('th-TH');
+          else dateText = String(item.date);
+        } catch (e) { dateText = String(item.date); }
+      }
+
+      html += '\x3Cdiv class="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex flex-col sm:flex-row justify-between gap-4" id="item-' + item.id + '"\x3E' +
+        '\x3Cdiv class="flex-1"\x3E' +
+        '\x3Ch4 class="font-bold text-gray-800"\x3Eรายการ #' + item.id + '\x3C/h4\x3E' +
+        '\x3Cp class="text-sm text-gray-600 my-1"\x3E' + details + '\x3C/p\x3E' +
+        '\x3Cp class="text-xs text-gray-400"\x3Eโดย: ' + item.recorderName + ' (' + dateText + ')\x3C/p\x3E' +
+        '\x3C/div\x3E' +
+        '\x3Cdiv class="flex sm:flex-col gap-2 shrink-0 justify-end"\x3E' +
+        '\x3Cbutton class="bg-success hover:bg-[#66bb6a] text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors" data-approve-id="' + item.id + '"\x3Eอนุมัติ\x3C/button\x3E' +
+        '\x3Cbutton class="bg-danger hover:bg-[#ef5350] text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors" data-reject-id="' + item.id + '"\x3Eปฏิเสธ\x3C/button\x3E' +
+        '\x3C/div\x3E' +
+        '\x3C/div\x3E';
+    });
+    list.innerHTML = html;
+  }
+
+  function approveItem(id) {
+    if (!confirm('ยืนยันการอนุมัติ?')) return;
+    google.script.run
+      .withSuccessHandler(() => {
+        document.getElementById('item-' + id).remove();
+        loadDashboardData(); // update counts
+      })
+      .approvePendingItemWeb(id, currentUser.userId);
+  }
+
+  function rejectItem(id) {
+    const reason = prompt('กรุณาระบุเหตุผลการปฏิเสธ:');
+    if (reason === null) return;
+    google.script.run
+      .withSuccessHandler(() => {
+        document.getElementById('item-' + id).remove();
+        loadDashboardData(); // update counts
+      })
+      .rejectPendingItemWeb(id, reason, currentUser.userId);
+  }
+
+  // -----------------------------------------------------
+  // Users Management
+  // -----------------------------------------------------
+  function loadUsers() {
+    document.getElementById('userTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="3">กำลังโหลด...\x3C/td\x3E\x3C/tr\x3E';
+    google.script.run
+      .withSuccessHandler(renderUsers)
+      .getUsersWeb(currentUser.userId);
+  }
+
+  function renderUsers(users) {
+    const tbody = document.getElementById('userTableBody');
+    let html = '';
+    users.forEach(u => {
+      const isSelf = u.userId === currentUser.userId;
+      html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors"\x3E' +
+        '\x3Ctd class="p-4"\x3E' + u.name + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4"\x3E' +
+        '\x3Cselect class="px-3 py-1.5 bg-gray-50 border-none rounded-lg text-sm focus:ring-2 focus:ring-primary" data-role-id="' + u.userId + '" ' + (isSelf ? 'disabled' : '') + '\x3E' +
+        '\x3Coption value="Customer" ' + (u.role === 'Customer' ? 'selected' : '') + '\x3ECustomer\x3C/option\x3E' +
+        '\x3Coption value="คนสวน" ' + (u.role === 'คนสวน' ? 'selected' : '') + '\x3Eคนสวน\x3C/option\x3E' +
+        '\x3Coption value="เจ้าของ" ' + (u.role === 'เจ้าของ' ? 'selected' : '') + '\x3Eเจ้าของ\x3C/option\x3E' +
+        '\x3Coption value="admin" ' + (u.role === 'admin' ? 'selected' : '') + '\x3Eadmin\x3C/option\x3E' +
+        '\x3C/select\x3E' +
+        '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-gray-400 text-sm"\x3E' + (isSelf ? '(คุณ)' : '') + '\x3C/td\x3E' +
+        '\x3C/tr\x3E';
+    });
+    tbody.innerHTML = html;
+  }
+
+  function changeRole(targetId, newRole) {
+    google.script.run
+      .withSuccessHandler(() => alert('อัปเดตสิทธิ์สำเร็จ'))
+      .withFailureHandler((err) => alert(err.message))
+      .updateUserRoleWeb(targetId, newRole, currentUser.userId);
+  }
+
+  // -----------------------------------------------------
+  // Income Management
+  // -----------------------------------------------------
+  function loadIncomeData() {
+    document.getElementById('incomeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-primary"\x3Eกำลังโหลดข้อมูลรายได้...\x3C/td\x3E\x3C/tr\x3E';
+
+    google.script.run
+      .withSuccessHandler(renderIncome)
+      .withFailureHandler(err => {
+        document.getElementById('incomeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-red-500"\x3Eเกิดข้อผิดพลาด: ' + err.message + '\x3C/td\x3E\x3C/tr\x3E';
+      })
+      .getIncomeDataWeb(currentUser.userId);
+  }
+
+  function renderIncome(data) {
+    document.getElementById('valTotalIncome').textContent = Number(data.totalIncome).toLocaleString();
+
+    const tbody = document.getElementById('incomeTableBody');
+    if (!data.items || data.items.length === 0) {
+      tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-gray-500"\x3Eไม่มีประวัติการขายในฤดูกาลนี้\x3C/td\x3E\x3C/tr\x3E';
+      return;
+    }
+
+    let html = '';
+    data.items.forEach(item => {
+      html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors"\x3E' +
+        '\x3Ctd class="p-4"\x3E' + new Date(item.date).toLocaleDateString('th-TH') + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 font-medium"\x3E' + item.treeId + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4"\x3E' + item.grade + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-right"\x3E' + Number(item.weight).toLocaleString() + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-right"\x3E' + Number(item.price).toLocaleString() + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-right font-bold text-primary"\x3E' + Number(item.total).toLocaleString() + '\x3C/td\x3E' +
+        '\x3C/tr\x3E';
+    });
+    tbody.innerHTML = html;
+  }
+
+  function getDriveImageUrl(url) {
+    if (!url) return '';
+    const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+    if (match) {
+      return 'https://drive.google.com/thumbnail?id=' + match[1] + '&sz=w400';
+    }
+    return url;
+  }
+
+  // -----------------------------------------------------
+  // Trees Management
+  // -----------------------------------------------------
+  let allTreesData = [];
+
+  function loadTrees() {
+    document.getElementById('treeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="4" style="text-align:center;">กำลังโหลด...\x3C/td\x3E\x3C/tr\x3E';
+    google.script.run
+      .withSuccessHandler(renderTrees)
+      .withFailureHandler((err) => alert(err.message))
+      .getAllTreesWeb(currentUser.userId);
+  }
+
+  function renderTrees(trees) {
+    allTreesData = trees;
+    displayTrees(trees);
+  }
+
+  function displayTrees(trees) {
+    const tbody = document.getElementById('treeTableBody');
+    if (trees.length === 0) {
+      tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="6" style="text-align:center;">ไม่มีข้อมูลต้นไม้\x3C/td\x3E\x3C/tr\x3E';
+      return;
+    }
+    let html = '';
+    trees.forEach(t => {
+      const displayUrl = getDriveImageUrl(t.photoUrl);
+      let imgHtml = displayUrl ? '\x3Cimg src="' + displayUrl + '" class="w-10 h-10 object-cover rounded-lg mx-auto shadow-sm"\x3E' : '\x3Cdiv class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-400 mx-auto"\x3Eไม่มีรูป\x3C/div\x3E';
+      html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors cursor-pointer" onclick="viewTree(\'' + t.id + '\')"\x3E' +
+        '\x3Ctd class="p-4 text-center"\x3E' + imgHtml + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 font-medium"\x3E' + t.id + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4"\x3E' + (t.variety || '-') + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4"\x3E' + (t.age || '-') + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-right font-medium"\x3E' + (t.fruitCount || '0') + '\x3C/td\x3E' +
+        '\x3Ctd class="p-4 text-center" onclick="event.stopPropagation()"\x3E' +
+        '\x3Cdiv class="flex items-center justify-center gap-2"\x3E' +
+        '\x3Cbutton class="bg-primary hover:bg-[#689f38] text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" data-edit-id="' + t.id + '"\x3Eแก้ไข\x3C/button\x3E' +
+        '\x3Cbutton class="bg-secondary hover:bg-[#f57f17] text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" data-print-id="' + t.id + '"\x3EQR Code\x3C/button\x3E' +
+        '\x3C/div\x3E' +
+        '\x3C/td\x3E' +
+        '\x3C/tr\x3E';
+    });
+    tbody.innerHTML = html;
+  }
+
+  function filterTrees() {
+    const q = document.getElementById('treeSearch').value.toLowerCase();
+    const filtered = allTreesData.filter(t => t.id.toLowerCase().includes(q) || t.variety.toLowerCase().includes(q));
+    displayTrees(filtered);
+  }
+
+  function viewTree(id) {
+    const t = allTreesData.find(x => x.id === id);
+    if (!t) return;
+
+    document.getElementById('detailTreeTitle').textContent = t.id;
+    document.getElementById('detailTreeVariety').textContent = t.variety || 'ไม่ระบุสายพันธุ์';
+    document.getElementById('detailTreeAge').textContent = t.age || '0';
+    document.getElementById('detailTreeFruitCount').textContent = t.fruitCount || '0';
+    document.getElementById('detailTreeFlowerMonth').textContent = t.flowerMonth || '-';
+
+    const latlngText = (t.lat && t.lng) ? `${t.lat}, ${t.lng}` : '-';
+    document.getElementById('detailTreeLatLng').textContent = latlngText;
+
+    const displayUrl = getDriveImageUrl(t.photoUrl);
+    const preview = document.getElementById('detailPhotoPreview');
+    const noPhoto = document.getElementById('detailNoPhoto');
+    if (displayUrl) {
+      preview.src = displayUrl;
+      preview.classList.remove('hidden');
+      noPhoto.classList.add('hidden');
+    } else {
+      preview.src = '';
+      preview.classList.add('hidden');
+      noPhoto.classList.remove('hidden');
+    }
+
+    document.getElementById('btnDetailEdit').onclick = () => {
+      closeTreeDetailModal();
+      editTree(t.id);
+    };
+
+    document.getElementById('btnDetailQR').onclick = () => {
+      closeTreeDetailModal();
+      printQR(t.id);
+    };
+
+    openTreeDetailModal();
+  }
+
+  function editTree(id) {
+    const t = allTreesData.find(x => x.id === id);
+    if (!t) return;
+    document.getElementById('editTreeId').value = t.id;
+    document.getElementById('modalTreeTitle').textContent = 'แก้ไขต้นไม้ ' + t.id;
+
+    // Try to set variety dropdown. If not in list, might need to handle 'อื่นๆ', but for now just set value
+    const varietySelect = document.getElementById('editVariety');
+    const validVarieties = ['หมอนทอง', 'ชะนี', 'ก้านยาว', 'กระดุม', 'พวงมณี', 'นกหยิบ', 'อื่นๆ'];
+    if (t.variety && validVarieties.includes(t.variety)) {
+      varietySelect.value = t.variety;
+    } else if (t.variety) {
+      varietySelect.value = 'อื่นๆ'; // We could add a custom text field later if 'อื่นๆ' is selected
+    } else {
+      varietySelect.value = 'หมอนทอง';
+    }
+
+    document.getElementById('editAge').value = t.age || '';
+    document.getElementById('editFruitCount').value = t.fruitCount || 0;
+    document.getElementById('editFlowerMonth').value = t.flowerMonth || '';
+    document.getElementById('editPhotoUrl').value = t.photoUrl || '';
+    document.getElementById('editPhotoFile').value = '';
+
+    renderPhotoGallery();
+
+    document.getElementById('editLat').value = t.lat || '';
+    document.getElementById('editLng').value = t.lng || '';
+    openTreeModal();
+  }
+
+  function renderPhotoGallery() {
+    const container = document.getElementById('editPhotoGallery');
+    const rawUrl = document.getElementById('editPhotoUrl').value || '';
+    container.innerHTML = '';
+
+    if (!rawUrl) return;
+
+    const urls = rawUrl.split(',').filter(u => u.trim() !== '');
+    urls.forEach((url, index) => {
+      const displayUrl = getDriveImageUrl(url);
+      const wrapper = document.createElement('div');
+      wrapper.className = 'relative shrink-0 w-32 h-32 rounded-2xl overflow-hidden shadow-sm group';
+
+      const img = document.createElement('img');
+      img.src = displayUrl;
+      img.className = 'w-full h-full object-cover';
+
+      wrapper.appendChild(img);
+
+      if (index === 0) {
+        wrapper.classList.add('ring-4', 'ring-primary');
+        const badge = document.createElement('div');
+        badge.className = 'absolute top-2 left-2 bg-primary text-white text-xs font-bold px-2 py-1 rounded-lg shadow';
+        badge.textContent = 'Hero';
+        wrapper.appendChild(badge);
+      } else {
+        const btn = document.createElement('button');
+        btn.className = 'absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center font-bold text-sm backdrop-blur-sm';
+        btn.textContent = 'ตั้งเป็นภาพหลัก';
+        btn.onclick = () => setHeroImage(index);
+        wrapper.appendChild(btn);
+      }
+
+      container.appendChild(wrapper);
+    });
+  }
+
+  function setHeroImage(index) {
+    const rawUrl = document.getElementById('editPhotoUrl').value || '';
+    const urls = rawUrl.split(',').filter(u => u.trim() !== '');
+    if (index > 0 && index < urls.length) {
+      const selected = urls.splice(index, 1)[0];
+      urls.unshift(selected);
+      document.getElementById('editPhotoUrl').value = urls.join(',');
+      renderPhotoGallery();
+    }
+  }
+
+  function handlePhotoUpload(input) {
+    if (input.files && input.files[0]) {
+      const file = input.files[0];
+
+      // Show a loading indicator in the gallery
+      const container = document.getElementById('editPhotoGallery');
+      const loadingWrapper = document.createElement('div');
+      loadingWrapper.className = 'shrink-0 w-32 h-32 rounded-2xl bg-gray-100 flex items-center justify-center shadow-sm';
+      loadingWrapper.innerHTML = '<span class="material-symbols-rounded animate-spin text-gray-400 text-3xl">refresh</span>';
+      container.appendChild(loadingWrapper);
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const base64 = e.target.result;
+        google.script.run
+          .withSuccessHandler(function (url) {
+            if (url) {
+              const currentVal = document.getElementById('editPhotoUrl').value;
+              const newVal = currentVal ? currentVal + ',' + url : url;
+              document.getElementById('editPhotoUrl').value = newVal;
+              renderPhotoGallery();
+            } else {
+              loadingWrapper.remove();
+              alert('อัปโหลดรูปล้มเหลว');
+            }
+          })
+          .uploadBase64PhotoToDrive(base64, file.name);
+      };
+      reader.readAsDataURL(file);
+    }
+  }
+
+  function saveTree() {
+    const data = {
+      id: document.getElementById('editTreeId').value,
+      variety: document.getElementById('editVariety').value,
+      age: document.getElementById('editAge').value,
+      fruitCount: document.getElementById('editFruitCount').value,
+      flowerMonth: document.getElementById('editFlowerMonth').value,
+      photoUrl: document.getElementById('editPhotoUrl').value,
+      lat: document.getElementById('editLat').value,
+      lng: document.getElementById('editLng').value
+    };
+
+    closeTreeModal();
+    document.getElementById('treeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-primary"\x3Eกำลังบันทึก...\x3C/td\x3E\x3C/tr\x3E';
+
+    google.script.run
+      .withSuccessHandler((res) => {
+        if (res.success) loadTrees();
+        else alert('Error: ' + res.error);
+      })
+      .withFailureHandler((err) => alert(err.message))
+      .updateTreeWeb(data, currentUser.userId);
+  }
+
+  function printQR(treeId) {
+    const qrData = encodeURIComponent('https://liff.line.me/' + LIFF_ID + '?tree=' + treeId);
+    const qrUrl = 'https://quickchart.io/qr?text=' + qrData + '&size=300';
+    window.open(qrUrl, '_blank');
+  }
+
+  // -----------------------------------------------------
+  // Map Management
+  // -----------------------------------------------------
+  let map = null;
+  let markersLayer = null;
+
+  function initMap() {
+    if (map) return;
+    map = L.map('map').setView([13.7563, 100.5018], 6); // Default view (Thailand)
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+    markersLayer = L.layerGroup().addTo(map);
+  }
+
+  function loadMapMarkers() {
+    if (allTreesData.length === 0) {
+      google.script.run
+        .withSuccessHandler((trees) => {
+          allTreesData = trees;
+          plotTreesOnMap();
+        })
+        .getAllTreesWeb(currentUser.userId);
+    } else {
+      plotTreesOnMap();
+    }
+  }
+
+  function plotTreesOnMap() {
+    if (!map) initMap();
+    markersLayer.clearLayers();
+
+    const bounds = [];
+    allTreesData.forEach(t => {
+      if (t.lat && t.lng) {
+        const lat = parseFloat(t.lat);
+        const lng = parseFloat(t.lng);
+        if (!isNaN(lat) && !isNaN(lng)) {
+          const marker = L.marker([lat, lng]);
+          marker.bindPopup('\u003cb\u003eรหัส: ' + t.id + '\u003c/b\u003e\x3Cbr\x3Eสายพันธุ์: ' + t.variety + '\x3Cbr\x3Eอายุ: ' + t.age + ' ปี\x3Cbr\x3E\x3Cbutton type="button" class="text-primary font-bold underline mt-2" data-edit-id="' + t.id + '"\u003eดูรายละเอียด / แก้ไข\x3C/button\x3E');
+          markersLayer.addLayer(marker);
+          bounds.push([lat, lng]);
         }
       }
     });
-  }
-}
 
-// -----------------------------------------------------
-// Pending Items
-// -----------------------------------------------------
-function loadPendingItems() {
-  document.getElementById('pendingList').innerHTML = '\x3Cp\x3Eกำลังโหลด...\x3C/p\x3E';
-  google.script.run
-    .withSuccessHandler(renderPendingItems)
-    .withFailureHandler((err) => {
-      document.getElementById('pendingList').innerHTML = '\x3Cp style="color:red"\x3Eเกิดข้อผิดพลาด: ' + err.message + '\x3C/p\x3E';
-    })
-    .getPendingItemsWeb(currentUser.userId);
-}
-
-function renderPendingItems(items) {
-  const list = document.getElementById('pendingList');
-  if (items.length === 0) {
-    list.innerHTML = '\x3Cp\x3Eไม่มีรายการรออนุมัติ\x3C/p\x3E';
-    return;
-  }
-  
-  let html = '';
-  items.forEach(item => {
-    let details = 'ต้น: ' + item.treeId + ' | รอกระทำ: ' + item.type;
-    if (item.type === 'ขาย' && item.data) {
-       details += '\x3Cbr\x3Eตัดขาย ' + item.data.quantity + ' ลูก | ราคา ' + item.data.price + ' บ/กก.';
+    if (bounds.length > 0) {
+      map.fitBounds(bounds);
     }
-    
-    html += '\x3Cdiv class="bg-white p-4 rounded-2xl shadow-sm border border-gray-50 flex flex-col sm:flex-row justify-between gap-4" id="item-' + item.id + '"\x3E' +
-      '\x3Cdiv class="flex-1"\x3E' +
-      '\x3Ch4 class="font-bold text-gray-800"\x3Eรายการ #' + item.id + '\x3C/h4\x3E' +
-      '\x3Cp class="text-sm text-gray-600 my-1"\x3E' + details + '\x3C/p\x3E' +
-      '\x3Cp class="text-xs text-gray-400"\x3Eโดย: ' + item.recorderName + ' (' + new Date(item.date).toLocaleDateString('th-TH') + ')\x3C/p\x3E' +
-      '\x3C/div\x3E' +
-      '\x3Cdiv class="flex sm:flex-col gap-2 shrink-0 justify-end"\x3E' +
-      '\x3Cbutton class="bg-success hover:bg-[#66bb6a] text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors" data-approve-id="' + item.id + '"\x3Eอนุมัติ\x3C/button\x3E' +
-      '\x3Cbutton class="bg-danger hover:bg-[#ef5350] text-white px-4 py-2 rounded-xl text-sm font-medium transition-colors" data-reject-id="' + item.id + '"\x3Eปฏิเสธ\x3C/button\x3E' +
-      '\x3C/div\x3E' +
-      '\x3C/div\x3E';
-  });
-  list.innerHTML = html;
-}
-
-function approveItem(id) {
-  if(!confirm('ยืนยันการอนุมัติ?')) return;
-  google.script.run
-    .withSuccessHandler(() => {
-      document.getElementById('item-' + id).remove();
-      loadDashboardData(); // update counts
-    })
-    .approvePendingItemWeb(id, currentUser.userId);
-}
-
-function rejectItem(id) {
-  const reason = prompt('กรุณาระบุเหตุผลการปฏิเสธ:');
-  if(reason === null) return;
-  google.script.run
-    .withSuccessHandler(() => {
-      document.getElementById('item-' + id).remove();
-      loadDashboardData(); // update counts
-    })
-    .rejectPendingItemWeb(id, reason, currentUser.userId);
-}
-
-// -----------------------------------------------------
-// Users Management
-// -----------------------------------------------------
-function loadUsers() {
-  document.getElementById('userTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="3">กำลังโหลด...\x3C/td\x3E\x3C/tr\x3E';
-  google.script.run
-    .withSuccessHandler(renderUsers)
-    .getUsersWeb(currentUser.userId);
-}
-
-function renderUsers(users) {
-  const tbody = document.getElementById('userTableBody');
-  let html = '';
-  users.forEach(u => {
-    const isSelf = u.userId === currentUser.userId;
-    html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors"\x3E' +
-      '\x3Ctd class="p-4"\x3E' + u.name + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4"\x3E' +
-      '\x3Cselect class="px-3 py-1.5 bg-gray-50 border-none rounded-lg text-sm focus:ring-2 focus:ring-primary" data-role-id="' + u.userId + '" ' + (isSelf ? 'disabled' : '') + '\x3E' +
-      '\x3Coption value="Customer" ' + (u.role === 'Customer' ? 'selected' : '') + '\x3ECustomer\x3C/option\x3E' +
-      '\x3Coption value="คนสวน" ' + (u.role === 'คนสวน' ? 'selected' : '') + '\x3Eคนสวน\x3C/option\x3E' +
-      '\x3Coption value="เจ้าของ" ' + (u.role === 'เจ้าของ' ? 'selected' : '') + '\x3Eเจ้าของ\x3C/option\x3E' +
-      '\x3Coption value="admin" ' + (u.role === 'admin' ? 'selected' : '') + '\x3Eadmin\x3C/option\x3E' +
-      '\x3C/select\x3E' +
-      '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-gray-400 text-sm"\x3E' + (isSelf ? '(คุณ)' : '') + '\x3C/td\x3E' +
-      '\x3C/tr\x3E';
-  });
-  tbody.innerHTML = html;
-}
-
-function changeRole(targetId, newRole) {
-  google.script.run
-    .withSuccessHandler(() => alert('อัปเดตสิทธิ์สำเร็จ'))
-    .withFailureHandler((err) => alert(err.message))
-    .updateUserRoleWeb(targetId, newRole, currentUser.userId);
-}
-
-// -----------------------------------------------------
-// Income Management
-// -----------------------------------------------------
-function loadIncomeData() {
-  document.getElementById('incomeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-primary"\x3Eกำลังโหลดข้อมูลรายได้...\x3C/td\x3E\x3C/tr\x3E';
-  
-  google.script.run
-    .withSuccessHandler(renderIncome)
-    .withFailureHandler(err => {
-      document.getElementById('incomeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-red-500"\x3Eเกิดข้อผิดพลาด: ' + err.message + '\x3C/td\x3E\x3C/tr\x3E';
-    })
-    .getIncomeDataWeb(currentUser.userId);
-}
-
-function renderIncome(data) {
-  document.getElementById('valTotalIncome').textContent = Number(data.totalIncome).toLocaleString();
-  
-  const tbody = document.getElementById('incomeTableBody');
-  if (!data.items || data.items.length === 0) {
-    tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-gray-500"\x3Eไม่มีประวัติการขายในฤดูกาลนี้\x3C/td\x3E\x3C/tr\x3E';
-    return;
-  }
-  
-  let html = '';
-  data.items.forEach(item => {
-    html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors"\x3E' +
-      '\x3Ctd class="p-4"\x3E' + new Date(item.date).toLocaleDateString('th-TH') + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 font-medium"\x3E' + item.treeId + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4"\x3E' + item.grade + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-right"\x3E' + Number(item.weight).toLocaleString() + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-right"\x3E' + Number(item.price).toLocaleString() + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-right font-bold text-primary"\x3E' + Number(item.total).toLocaleString() + '\x3C/td\x3E' +
-      '\x3C/tr\x3E';
-  });
-  tbody.innerHTML = html;
-}
-
-function getDriveImageUrl(url) {
-  if (!url) return '';
-  const match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
-  if (match) {
-    return 'https://drive.google.com/thumbnail?id=' + match[1] + '&sz=w400';
-  }
-  return url;
-}
-
-// -----------------------------------------------------
-// Trees Management
-// -----------------------------------------------------
-let allTreesData = [];
-
-function loadTrees() {
-  document.getElementById('treeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="4" style="text-align:center;">กำลังโหลด...\x3C/td\x3E\x3C/tr\x3E';
-  google.script.run
-    .withSuccessHandler(renderTrees)
-    .withFailureHandler((err) => alert(err.message))
-    .getAllTreesWeb(currentUser.userId);
-}
-
-function renderTrees(trees) {
-  allTreesData = trees;
-  displayTrees(trees);
-}
-
-function displayTrees(trees) {
-  const tbody = document.getElementById('treeTableBody');
-  if (trees.length === 0) {
-    tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="6" style="text-align:center;">ไม่มีข้อมูลต้นไม้\x3C/td\x3E\x3C/tr\x3E';
-    return;
-  }
-  let html = '';
-  trees.forEach(t => {
-    const displayUrl = getDriveImageUrl(t.photoUrl);
-    let imgHtml = displayUrl ? '\x3Cimg src="' + displayUrl + '" class="w-10 h-10 object-cover rounded-lg mx-auto shadow-sm"\x3E' : '\x3Cdiv class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-400 mx-auto"\x3Eไม่มีรูป\x3C/div\x3E';
-    html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors cursor-pointer" onclick="viewTree(\'' + t.id + '\')"\x3E' +
-      '\x3Ctd class="p-4 text-center"\x3E' + imgHtml + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 font-medium"\x3E' + t.id + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4"\x3E' + (t.variety || '-') + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4"\x3E' + (t.age || '-') + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-right font-medium"\x3E' + (t.fruitCount || '0') + '\x3C/td\x3E' +
-      '\x3Ctd class="p-4 text-center" onclick="event.stopPropagation()"\x3E' +
-      '\x3Cdiv class="flex items-center justify-center gap-2"\x3E' +
-      '\x3Cbutton class="bg-primary hover:bg-[#689f38] text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" data-edit-id="' + t.id + '"\x3Eแก้ไข\x3C/button\x3E' +
-      '\x3Cbutton class="bg-secondary hover:bg-[#f57f17] text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" data-print-id="' + t.id + '"\x3EQR Code\x3C/button\x3E' +
-      '\x3C/div\x3E' +
-      '\x3C/td\x3E' +
-      '\x3C/tr\x3E';
-  });
-  tbody.innerHTML = html;
-}
-
-function filterTrees() {
-  const q = document.getElementById('treeSearch').value.toLowerCase();
-  const filtered = allTreesData.filter(t => t.id.toLowerCase().includes(q) || t.variety.toLowerCase().includes(q));
-  displayTrees(filtered);
-}
-
-function viewTree(id) {
-  const t = allTreesData.find(x => x.id === id);
-  if(!t) return;
-  
-  document.getElementById('detailTreeTitle').textContent = t.id;
-  document.getElementById('detailTreeVariety').textContent = t.variety || 'ไม่ระบุสายพันธุ์';
-  document.getElementById('detailTreeAge').textContent = t.age || '0';
-  document.getElementById('detailTreeFruitCount').textContent = t.fruitCount || '0';
-  document.getElementById('detailTreeFlowerMonth').textContent = t.flowerMonth || '-';
-  
-  const latlngText = (t.lat && t.lng) ? `${t.lat}, ${t.lng}` : '-';
-  document.getElementById('detailTreeLatLng').textContent = latlngText;
-  
-  const displayUrl = getDriveImageUrl(t.photoUrl);
-  const preview = document.getElementById('detailPhotoPreview');
-  const noPhoto = document.getElementById('detailNoPhoto');
-  if (displayUrl) {
-    preview.src = displayUrl;
-    preview.classList.remove('hidden');
-    noPhoto.classList.add('hidden');
-  } else {
-    preview.src = '';
-    preview.classList.add('hidden');
-    noPhoto.classList.remove('hidden');
-  }
-  
-  document.getElementById('btnDetailEdit').onclick = () => {
-    closeTreeDetailModal();
-    editTree(t.id);
-  };
-  
-  document.getElementById('btnDetailQR').onclick = () => {
-    closeTreeDetailModal();
-    printQR(t.id);
-  };
-  
-  openTreeDetailModal();
-}
-
-function editTree(id) {
-  const t = allTreesData.find(x => x.id === id);
-  if(!t) return;
-  document.getElementById('editTreeId').value = t.id;
-  document.getElementById('modalTreeTitle').textContent = 'แก้ไขต้นไม้ ' + t.id;
-  
-  // Try to set variety dropdown. If not in list, might need to handle 'อื่นๆ', but for now just set value
-  const varietySelect = document.getElementById('editVariety');
-  const validVarieties = ['หมอนทอง', 'ชะนี', 'ก้านยาว', 'กระดุม', 'พวงมณี', 'นกหยิบ', 'อื่นๆ'];
-  if (t.variety && validVarieties.includes(t.variety)) {
-    varietySelect.value = t.variety;
-  } else if (t.variety) {
-    varietySelect.value = 'อื่นๆ'; // We could add a custom text field later if 'อื่นๆ' is selected
-  } else {
-    varietySelect.value = 'หมอนทอง';
   }
 
-  document.getElementById('editAge').value = t.age || '';
-  document.getElementById('editFruitCount').value = t.fruitCount || 0;
-  document.getElementById('editFlowerMonth').value = t.flowerMonth || '';
-  document.getElementById('editPhotoUrl').value = t.photoUrl || '';
-  document.getElementById('editPhotoFile').value = '';
-  
-  renderPhotoGallery();
-
-  document.getElementById('editLat').value = t.lat || '';
-  document.getElementById('editLng').value = t.lng || '';
-  openTreeModal();
-}
-
-function renderPhotoGallery() {
-  const container = document.getElementById('editPhotoGallery');
-  const rawUrl = document.getElementById('editPhotoUrl').value || '';
-  container.innerHTML = '';
-  
-  if (!rawUrl) return;
-  
-  const urls = rawUrl.split(',').filter(u => u.trim() !== '');
-  urls.forEach((url, index) => {
-    const displayUrl = getDriveImageUrl(url);
-    const wrapper = document.createElement('div');
-    wrapper.className = 'relative shrink-0 w-32 h-32 rounded-2xl overflow-hidden shadow-sm group';
-    
-    const img = document.createElement('img');
-    img.src = displayUrl;
-    img.className = 'w-full h-full object-cover';
-    
-    wrapper.appendChild(img);
-    
-    if (index === 0) {
-      wrapper.classList.add('ring-4', 'ring-primary');
-      const badge = document.createElement('div');
-      badge.className = 'absolute top-2 left-2 bg-primary text-white text-xs font-bold px-2 py-1 rounded-lg shadow';
-      badge.textContent = 'Hero';
-      wrapper.appendChild(badge);
-    } else {
-      const btn = document.createElement('button');
-      btn.className = 'absolute inset-0 bg-black/50 text-white opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center font-bold text-sm backdrop-blur-sm';
-      btn.textContent = 'ตั้งเป็นภาพหลัก';
-      btn.onclick = () => setHeroImage(index);
-      wrapper.appendChild(btn);
+  // -----------------------------------------------------
+  // Event Delegation
+  // -----------------------------------------------------
+  document.addEventListener('click', function (e) {
+    if (e.target && e.target.hasAttribute('data-approve-id')) {
+      approveItem(e.target.getAttribute('data-approve-id'));
     }
-    
-    container.appendChild(wrapper);
-  });
-}
-
-function setHeroImage(index) {
-  const rawUrl = document.getElementById('editPhotoUrl').value || '';
-  const urls = rawUrl.split(',').filter(u => u.trim() !== '');
-  if (index > 0 && index < urls.length) {
-    const selected = urls.splice(index, 1)[0];
-    urls.unshift(selected);
-    document.getElementById('editPhotoUrl').value = urls.join(',');
-    renderPhotoGallery();
-  }
-}
-
-function handlePhotoUpload(input) {
-  if (input.files && input.files[0]) {
-    const file = input.files[0];
-    
-    // Show a loading indicator in the gallery
-    const container = document.getElementById('editPhotoGallery');
-    const loadingWrapper = document.createElement('div');
-    loadingWrapper.className = 'shrink-0 w-32 h-32 rounded-2xl bg-gray-100 flex items-center justify-center shadow-sm';
-    loadingWrapper.innerHTML = '<span class="material-symbols-rounded animate-spin text-gray-400 text-3xl">refresh</span>';
-    container.appendChild(loadingWrapper);
-    
-    const reader = new FileReader();
-    reader.onload = function(e) {
-      const base64 = e.target.result;
-      google.script.run
-        .withSuccessHandler(function(url) {
-          if (url) {
-            const currentVal = document.getElementById('editPhotoUrl').value;
-            const newVal = currentVal ? currentVal + ',' + url : url;
-            document.getElementById('editPhotoUrl').value = newVal;
-            renderPhotoGallery();
-          } else {
-            loadingWrapper.remove();
-            alert('อัปโหลดรูปล้มเหลว');
-          }
-        })
-        .uploadBase64PhotoToDrive(base64, file.name);
-    };
-    reader.readAsDataURL(file);
-  }
-}
-
-function saveTree() {
-  const data = {
-    id: document.getElementById('editTreeId').value,
-    variety: document.getElementById('editVariety').value,
-    age: document.getElementById('editAge').value,
-    fruitCount: document.getElementById('editFruitCount').value,
-    flowerMonth: document.getElementById('editFlowerMonth').value,
-    photoUrl: document.getElementById('editPhotoUrl').value,
-    lat: document.getElementById('editLat').value,
-    lng: document.getElementById('editLng').value
-  };
-  
-  closeTreeModal();
-  document.getElementById('treeTableBody').innerHTML = '\x3Ctr>\x3Ctd colspan="6" class="p-4 text-center text-primary"\x3Eกำลังบันทึก...\x3C/td\x3E\x3C/tr\x3E';
-  
-  google.script.run
-    .withSuccessHandler((res) => {
-      if(res.success) loadTrees();
-      else alert('Error: ' + res.error);
-    })
-    .withFailureHandler((err) => alert(err.message))
-    .updateTreeWeb(data, currentUser.userId);
-}
-
-function printQR(treeId) {
-  const qrData = encodeURIComponent('https://liff.line.me/' + LIFF_ID + '?tree=' + treeId);
-  const qrUrl = 'https://quickchart.io/qr?text=' + qrData + '&size=300';
-  window.open(qrUrl, '_blank');
-}
-
-// -----------------------------------------------------
-// Map Management
-// -----------------------------------------------------
-let map = null;
-let markersLayer = null;
-
-function initMap() {
-  if (map) return;
-  map = L.map('map').setView([13.7563, 100.5018], 6); // Default view (Thailand)
-  L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-    maxZoom: 19,
-    attribution: '© OpenStreetMap'
-  }).addTo(map);
-  markersLayer = L.layerGroup().addTo(map);
-}
-
-function loadMapMarkers() {
-  if (allTreesData.length === 0) {
-    google.script.run
-      .withSuccessHandler((trees) => {
-        allTreesData = trees;
-        plotTreesOnMap();
-      })
-      .getAllTreesWeb(currentUser.userId);
-  } else {
-    plotTreesOnMap();
-  }
-}
-
-function plotTreesOnMap() {
-  if (!map) initMap();
-  markersLayer.clearLayers();
-  
-  const bounds = [];
-  allTreesData.forEach(t => {
-    if (t.lat && t.lng) {
-      const lat = parseFloat(t.lat);
-      const lng = parseFloat(t.lng);
-      if(!isNaN(lat) && !isNaN(lng)){
-        const marker = L.marker([lat, lng]);
-        marker.bindPopup('<b>รหัส: ' + t.id + '</b>\x3Cbr\x3Eสายพันธุ์: ' + t.variety + '\x3Cbr\x3Eอายุ: ' + t.age + ' ปี\x3Cbr\x3E\x3Ca href="#" data-edit-id="' + t.id + '">แก้ไขพิกัด\x3C/a\x3E');
-        markersLayer.addLayer(marker);
-        bounds.push([lat, lng]);
-      }
+    if (e.target && e.target.hasAttribute('data-reject-id')) {
+      rejectItem(e.target.getAttribute('data-reject-id'));
+    }
+    if (e.target && e.target.hasAttribute('data-edit-id')) {
+      editTree(e.target.getAttribute('data-edit-id'));
+    }
+    if (e.target && e.target.hasAttribute('data-print-id')) {
+      printQR(e.target.getAttribute('data-print-id'));
     }
   });
-  
-  if (bounds.length > 0) {
-    map.fitBounds(bounds);
-  }
-}
-
-// -----------------------------------------------------
-// Event Delegation
-// -----------------------------------------------------
-document.addEventListener('click', function(e) {
-  if (e.target && e.target.hasAttribute('data-approve-id')) {
-    approveItem(e.target.getAttribute('data-approve-id'));
-  }
-  if (e.target && e.target.hasAttribute('data-reject-id')) {
-    rejectItem(e.target.getAttribute('data-reject-id'));
-  }
-  if (e.target && e.target.hasAttribute('data-edit-id')) {
-    editTree(e.target.getAttribute('data-edit-id'));
-  }
-  if (e.target && e.target.hasAttribute('data-print-id')) {
-    printQR(e.target.getAttribute('data-print-id'));
-  }
-});
-document.addEventListener('change', function(e) {
-  if (e.target && e.target.hasAttribute('data-role-id')) {
-    changeRole(e.target.getAttribute('data-role-id'), e.target.value);
-  }
-});
+  document.addEventListener('change', function (e) {
+    if (e.target && e.target.hasAttribute('data-role-id')) {
+      changeRole(e.target.getAttribute('data-role-id'), e.target.value);
+    }
+  });
 
 </script>
