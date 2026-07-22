@@ -1,190 +1,333 @@
 <!DOCTYPE html>
-<html>
+<html lang="th">
+
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>สแกน QR Code ต้นทุเรียน</title>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1.0" name="viewport" />
+    <title>บ้านสวนโพรงกระต่าย - QR Scanner</title>
+    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+    <link
+        href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700;800&amp;family=Noto+Sans+Thai:wght@300;400;500;600;700&amp;family=Quicksand:wght@500;600;700&amp;display=swap"
+        rel="stylesheet" />
+    <link
+        href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap"
+        rel="stylesheet" />
+    <script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#7CB342",
+                        "on-primary": "#FFFFFF",
+                        secondary: "#F9A825",
+                        tertiary: "#A1887F",
+                        surface: "#FFFFFF",
+                        "on-surface": "#1C1B1F",
+                        "on-surface-variant": "#49454F",
+                        "surface-container": "#F5F5F5",
+                        "surface-variant": "#E7E0EC"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    fontFamily: {
+                        headline: ["Quicksand", "Noto Sans Thai", "sans-serif"],
+                        display: ["Quicksand", "Noto Sans Thai", "sans-serif"],
+                        body: ["Public Sans", "Noto Sans Thai", "sans-serif"],
+                        label: ["Public Sans", "Noto Sans Thai", "sans-serif"]
+                    }
+                },
+            },
+        }
+    </script>
     <style>
-        :root {
-            --primary-color: #2E7D32; /* Green farm theme */
-            --bg-color: #F1F8E9;
-            --text-color: #333333;
-            --error-color: #D32F2F;
-        }
         body {
-            font-family: 'Sarabun', 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-            background-color: var(--bg-color);
-            color: var(--text-color);
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: center;
-            height: 100vh;
+            font-family: 'Public Sans', 'Noto Sans Thai', sans-serif;
             margin: 0;
-            padding: 20px;
-            box-sizing: border-box;
-            text-align: center;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+            min-height: max(884px, 100dvh);
         }
-        .container {
-            background-color: white;
-            padding: 30px 20px;
-            border-radius: 12px;
-            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .scanner-overlay {
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(2px);
+        }
+
+        .viewfinder-corner {
+            width: 40px;
+            height: 40px;
+            border-color: #7CB342;
+            position: absolute;
+        }
+
+        @keyframes scan-line {
+            0% {
+                top: 0%;
+                opacity: 0;
+            }
+
+            10% {
+                opacity: 1;
+            }
+
+            90% {
+                opacity: 1;
+            }
+
+            100% {
+                top: 100%;
+                opacity: 0;
+            }
+        }
+
+        .scan-anim-line {
+            height: 2px;
+            background: linear-gradient(to right, transparent, #7CB342, transparent);
+            position: absolute;
             width: 100%;
-            max-width: 400px;
+            box-shadow: 0 0 8px #7CB342;
+            animation: scan-line 3s linear infinite;
         }
-        h1 {
-            color: var(--primary-color);
-            font-size: 24px;
-            margin-top: 0;
-            margin-bottom: 20px;
-        }
-        #status {
-            font-size: 16px;
-            margin-bottom: 20px;
-            color: #555;
-        }
-        button {
-            background-color: var(--primary-color);
-            color: white;
-            border: none;
-            padding: 15px 30px;
-            font-size: 18px;
-            border-radius: 8px;
-            cursor: pointer;
-            width: 100%;
-            font-weight: bold;
-            box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-            transition: background-color 0.3s;
-        }
-        button:active {
-            background-color: #1B5E20;
-        }
-        button:disabled {
-            background-color: #9E9E9E;
-            cursor: not-allowed;
-        }
-        #errorMsg {
-            color: var(--error-color);
-            margin-top: 15px;
-            font-size: 14px;
-            display: none;
-            padding: 10px;
-            background-color: #FFEBEE;
-            border-radius: 4px;
-        }
-        .loader {
-            border: 4px solid #f3f3f3;
-            border-top: 4px solid var(--primary-color);
-            border-radius: 50%;
-            width: 30px;
-            height: 30px;
-            animation: spin 1s linear infinite;
-            margin: 0 auto 15px auto;
-        }
-        @keyframes spin {
-            0% { transform: rotate(0deg); }
-            100% { transform: rotate(360deg); }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
         }
     </style>
 </head>
-<body>
 
-    <div class="container">
-        <h1>🌳 สแกน QR ต้นทุเรียน</h1>
-        
-        <div id="loading" class="loader"></div>
-        <p id="status">กำลังโหลดระบบ...</p>
-        
-        <button id="scanBtn" onclick="scanQR()" style="display:none;">📷 เปิดกล้องสแกน</button>
-        
-        <div id="errorMsg"></div>
+<body class="bg-black h-screen w-full flex flex-col">
+    <!-- Camera Preview Background -->
+    <div class="fixed inset-0 z-0 h-full w-full">
+        <div class="w-full h-full bg-cover bg-center opacity-80 scale-110"
+            style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCKxGnq5tQJkBWLiygV1XDxC8rkQKIRuZzTUyF3xUsAFheT2BF_61EgGQpkkjcCFaCElKL7Bc1PUk7HsAibLQUaiPuGuJ1FscK_A8JZYNcWwsP1erXBw5c6FxHbesggUp2LlE6AfSSBRb1FxuVlkrZSkaPznTulyVGQoPYD6qxYuhkK3Q16F8jnjFJj86KczZgBy4kQyFi5nLut--hqr6FFwilu9o0PznF-XdB5sorNxqwK0u7QiFNrhOP1xdOtpg5UgHjMGuMhYJUZ')">
+        </div>
     </div>
+    <!-- Top App Bar -->
+    <header
+        class="fixed top-0 left-0 w-full z-50 bg-white shadow-sm rounded-b-xl flex justify-between items-center px-4 h-16">
+        <div class="flex items-center gap-3">
+            <button
+                class="p-2 hover:bg-surface-variant/50 transition-colors duration-200 rounded-full flex items-center justify-center text-on-surface-variant">
+                <span class="material-symbols-outlined" data-icon="help">help</span>
+            </button>
+        </div>
+        <h1 class="font-headline font-bold text-primary text-headline-sm">บ้านสวนโพรงกระต่าย</h1>
+        <div class="flex items-center">
+            <button
+                class="p-2 hover:bg-surface-variant/50 transition-colors duration-200 rounded-full flex items-center justify-center text-on-surface-variant">
+                <span class="material-symbols-outlined" data-icon="close">close</span>
+            </button>
+        </div>
+    </header>
+    <!-- Main Scanner UI Content -->
+    <main class="relative flex-1 flex flex-col items-center justify-center z-10 mt-16 mb-20">
+        <!-- Viewfinder Overlay Structure -->
+        <div class="w-full h-full flex flex-col items-center justify-center relative">
+            <div class="absolute top-0 left-0 right-0 h-[20%] scanner-overlay"></div>
+            <div class="absolute bottom-0 left-0 right-0 h-[30%] scanner-overlay"></div>
+            <div class="absolute top-[20%] left-0 w-[10%] h-[50%] scanner-overlay"></div>
+            <div class="absolute top-[20%] right-0 w-[10%] h-[50%] scanner-overlay"></div>
+            <!-- Viewfinder Frame -->
+            <div class="relative w-[80vw] max-w-[320px] aspect-square flex items-center justify-center">
+                <div class="viewfinder-corner top-0 left-0 border-t-4 border-l-4 rounded-tl-xl"></div>
+                <div class="viewfinder-corner top-0 right-0 border-t-4 border-r-4 rounded-tr-xl"></div>
+                <div class="viewfinder-corner bottom-0 left-0 border-b-4 border-l-4 rounded-bl-xl"></div>
+                <div class="viewfinder-corner bottom-0 right-0 border-b-4 border-r-4 rounded-br-xl"></div>
+                <div class="scan-anim-line"></div>
 
-    <!-- LIFF SDK -->
-    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+                <!-- SCAN BUTTON (Appears when LIFF is ready) -->
+                <button id="scanBtn" onclick="scanQR()" style="display:none;"
+                    class="bg-primary hover:bg-green-600 active:scale-95 transition-all text-white font-bold py-4 px-8 rounded-full shadow-[0_4px_12px_rgba(124,179,66,0.4)] flex items-center gap-2 z-20">
+                    <span class="material-symbols-outlined">qr_code_scanner</span>
+                    เปิดกล้องสแกน
+                </button>
+
+            </div>
+            <!-- Instruction Text -->
+            <div class="mt-8 px-6 py-3 rounded-full glass-panel flex flex-col items-center gap-2 text-center">
+                <div class="flex items-center gap-2">
+                    <span class="material-symbols-outlined text-white text-sm" id="status-icon">sync</span>
+                    <p class="text-white text-sm font-medium tracking-wide" id="status-text">
+                        กำลังเชื่อมต่อระบบ...
+                    </p>
+                </div>
+                <p class="text-red-300 text-xs font-bold" id="errorMsg" style="display:none;"></p>
+            </div>
+        </div>
+    </main>
+    <!-- Bottom Navigation Bar -->
+    <nav
+        class="fixed bottom-0 left-0 w-full flex justify-around items-center px-2 py-3 bg-white border-t border-surface-variant/20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] z-50 rounded-t-xl">
+        <a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200"
+            href="#">
+            <span class="material-symbols-outlined" data-icon="home">home</span>
+            <span class="font-label text-[10px]">หน้าหลัก</span>
+        </a>
+        <a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200"
+            href="#">
+            <span class="material-symbols-outlined" data-icon="park">park</span>
+            <span class="font-label text-[10px]">ต้นไม้</span>
+        </a>
+        <!-- Active Tab: สแกน (Scan) -->
+        <a class="flex flex-col items-center justify-center text-primary font-bold bg-primary/10 rounded-xl px-3 py-1 active:scale-95 transition-all duration-200"
+            href="#">
+            <span class="material-symbols-outlined" data-icon="qr_code_scanner"
+                style="font-variation-settings: 'FILL' 1;">qr_code_scanner</span>
+            <span class="font-label text-[10px]">สแกน</span>
+        </a>
+        <a class="flex flex-col items-center justify-center text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200"
+            href="#">
+            <span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+            <span class="font-label text-[10px]">สรุปผล</span>
+        </a>
+    </nav>
+
+    <!-- Polyfill for localStorage/sessionStorage to fix iOS Safari Iframe Hang -->
     <script>
-        // กำหนด LIFF ID ของคุณที่นี่ หรือดึงจาก GAS template
-        const LIFF_ID = "<?= liffId ?>"; 
-        
-        let currentFlow = 'unknown';
-
-        window.onload = function() {
-            // อ่านค่า URL Parameter 'flow'
-            const urlParams = new URLSearchParams(window.location.search);
-            currentFlow = urlParams.get('flow') || 'unknown';
-            
-            initializeLiff();
+        // Android WebView Cache Buster for LIFF
+        var originalFetch = window.fetch;
+        window.fetch = function (url, options) {
+            if (typeof url === 'string' && url.indexOf('line-scdn.net') !== -1) {
+                url += (url.indexOf('?') !== -1 ? '&' : '?') + '_cacheBuster=' + Math.random();
+            }
+            return originalFetch(url, options);
         };
 
-        function showError(message) {
-            const errorDiv = document.getElementById('errorMsg');
-            errorDiv.textContent = message;
-            errorDiv.style.display = 'block';
-            document.getElementById('loading').style.display = 'none';
+        try {
+            var x = '__storage_test__';
+            window.localStorage.setItem(x, x);
+            window.localStorage.removeItem(x);
+        } catch (e) {
+            console.warn('localStorage is blocked, using polyfill');
+            var memoryStorage = function () {
+                var data = {};
+                return {
+                    setItem: function (id, val) { data[id] = String(val); },
+                    getItem: function (id) { return data.hasOwnProperty(id) ? data[id] : null; },
+                    removeItem: function (id) { delete data[id]; },
+                    clear: function () { data = {}; }
+                };
+            };
+            Object.defineProperty(window, 'localStorage', { value: memoryStorage(), writable: true });
+            Object.defineProperty(window, 'sessionStorage', { value: memoryStorage(), writable: true });
         }
+    </script>
+
+    <!-- LIFF SDK & Logic -->
+    <script src="https://static.line-scdn.net/liff/edge/2/sdk.js"></script>
+    <script>
+        // Global Error Handler for better debugging
+        window.onerror = function (message, source, lineno, colno, error) {
+            showError("Error: " + message + " (Line " + lineno + ")");
+            return true;
+        };
+        window.addEventListener("unhandledrejection", function (event) {
+            showError("Promise Error: " + (event.reason ? event.reason.message : "unknown"));
+        });
+
+        const LIFF_ID = <?= JSON.stringify(liffId) ?>;
+        let currentFlow = 'unknown';
+
+        function setStatus(text, icon = 'sync') {
+            document.getElementById('status-text').textContent = text;
+            document.getElementById('status-icon').textContent = icon;
+        }
+
+        function showError(message) {
+            setStatus("เกิดข้อผิดพลาด", "error");
+            document.getElementById('status-text').classList.add("text-red-400");
+            const err = document.getElementById('errorMsg');
+            err.textContent = message;
+            err.style.display = 'block';
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            setStatus("DOM Ready...");
+            const urlParams = new URLSearchParams(window.location.search);
+            currentFlow = urlParams.get('flow') || 'unknown';
+            initializeLiff();
+        });
 
         async function initializeLiff() {
             try {
+                setStatus("Checking LIFF ID...");
+                if (!LIFF_ID || LIFF_ID === "" || LIFF_ID === "null") {
+                    throw new Error("ยังไม่ได้ใส่ LIFF_ID ใน Google Sheets (ค่าปัจจุบัน: " + LIFF_ID + ")");
+                }
+
+                setStatus("liff.init...");
                 await liff.init({ liffId: LIFF_ID });
-                
+
                 if (!liff.isLoggedIn()) {
+                    setStatus("Logging in...");
                     liff.login();
                     return;
                 }
 
-                // Check if user is in LINE Client
                 if (!liff.isInClient()) {
                     showError("กรุณาเปิดลิงก์นี้ผ่านแอปพลิเคชัน LINE เท่านั้น");
-                    document.getElementById('status').textContent = "ระบบไม่รองรับเบราว์เซอร์ภายนอก";
                     return;
                 }
 
                 // Ready to scan
-                document.getElementById('loading').style.display = 'none';
-                document.getElementById('status').textContent = "ระบบพร้อมใช้งาน กดปุ่มด้านล่างเพื่อสแกน";
-                document.getElementById('scanBtn').style.display = 'block';
+                setStatus("พร้อมใช้งาน", "check_circle");
+                document.getElementById('status-text').classList.remove("text-red-400");
+                document.getElementById('status-text').classList.add("text-green-400");
+                document.getElementById('scanBtn').style.display = 'flex';
 
+                // Auto-trigger scan for convenience if we want, but let user click is safer
             } catch (err) {
                 console.error('LIFF Initialization failed ', err);
-                showError("เกิดข้อผิดพลาดในการโหลด LIFF: " + err.message);
+                showError(err.message);
             }
         }
 
         async function scanQR() {
             const scanBtn = document.getElementById('scanBtn');
             scanBtn.disabled = true;
-            scanBtn.textContent = "กำลังเปิดกล้อง...";
-            document.getElementById('errorMsg').style.display = 'none';
+            scanBtn.innerHTML = '<span class="material-symbols-outlined animate-spin">refresh</span> กำลังโหลดกล้อง...';
 
             try {
                 if (liff.scanCodeV2) {
                     const result = await liff.scanCodeV2();
-                    
                     if (result && result.value) {
                         processQRData(result.value);
                     } else {
-                        scanBtn.disabled = false;
-                        scanBtn.textContent = "📷 เปิดกล้องสแกน";
+                        resetBtn();
                     }
                 } else {
-                    showError("อุปกรณ์ของคุณไม่รองรับฟีเจอร์สแกน QR Code ผ่าน LIFF (กรุณาอัปเดตแอป LINE)");
-                    scanBtn.disabled = false;
-                    scanBtn.textContent = "📷 เปิดกล้องสแกน";
+                    showError("LINE ของคุณไม่รองรับการสแกน QR Code ผ่าน LIFF (กรุณาอัปเดต LINE)");
+                    resetBtn();
                 }
             } catch (err) {
                 console.error("Scan error", err);
                 showError("ไม่สามารถเปิดกล้องได้: " + err.message);
-                scanBtn.disabled = false;
-                scanBtn.textContent = "📷 เปิดกล้องสแกน";
+                resetBtn();
             }
+        }
+
+        function resetBtn() {
+            const scanBtn = document.getElementById('scanBtn');
+            scanBtn.disabled = false;
+            scanBtn.innerHTML = '<span class="material-symbols-outlined">qr_code_scanner</span> สแกนใหม่อีกครั้ง';
         }
 
         async function processQRData(qrUrl) {
             try {
-                document.getElementById('status').textContent = "กำลังประมวลผลข้อมูล...";
-                
-                // รูปแบบ QR: https://liff.line.me/{LIFF_ID}?tree={TREE_ID}
+                setStatus("กำลังประมวลผลข้อมูล...", "hourglass_empty");
+
                 const parsedUrl = new URL(qrUrl);
                 const treeId = parsedUrl.searchParams.get('tree');
 
@@ -193,29 +336,21 @@
                 }
 
                 const messageText = `SCAN:${currentFlow}:${treeId}`;
+                await liff.sendMessages([{ type: 'text', text: messageText }]);
 
-                await liff.sendMessages([
-                    {
-                        type: 'text',
-                        text: messageText
-                    }
-                ]);
+                setStatus("ส่งข้อมูลสำเร็จ! กำลังปิดหน้าจอ...", "check_circle");
 
-                document.getElementById('status').textContent = "ส่งข้อมูลสำเร็จ กำลังปิดหน้าต่าง...";
-                
                 setTimeout(() => {
                     liff.closeWindow();
                 }, 1000);
 
             } catch (err) {
                 console.error("Processing error", err);
-                showError("ข้อผิดพลาด: " + err.message);
-                
-                const scanBtn = document.getElementById('scanBtn');
-                scanBtn.disabled = false;
-                scanBtn.textContent = "📷 สแกนใหม่อีกครั้ง";
+                showError(err.message);
+                resetBtn();
             }
         }
     </script>
 </body>
+
 </html>

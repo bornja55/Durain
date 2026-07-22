@@ -1,21 +1,189 @@
-function buildTreeInfoFlex(treeInfo, remaining) {
+function getDriveImageUrlForLine(driveUrl) {
+  if (!driveUrl) return '';
+  const match = driveUrl.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (match) return `https://drive.google.com/thumbnail?id=${match[1]}&sz=w800`;
+  return '';
+}
+
+function buildTreeInfoFlex(treeInfo, remaining, harvestHistory) {
+  const treePhotoRaw = treeInfo['\u0e23\u0e39\u0e1b\u0e20\u0e32\u0e1e URL'] || '';
+  const treePhotoUrls = treePhotoRaw ? treePhotoRaw.split(',') : [];
+  const treePhotoUrl = getDriveImageUrlForLine(treePhotoUrls[0] || '');
+  const bubbles = [];
+
+  // 1. การ์ดแรก: ข้อมูลต้นไม้ (Profile)
+  const profileBody = [
+    { type: 'text', text: `\u0e15\u0e49\u0e19 ${treeInfo['\u0e23\u0e2b\u0e31\u0e2a\u0e15\u0e49\u0e19']}`, weight: 'bold', size: 'xl', color: '#1DB446' },
+    { type: 'separator', margin: 'md' },
+    {
+      type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm',
+      contents: [
+        { type: 'box', layout: 'horizontal', contents: [
+          { type: 'text', text: '\u0e1e\u0e31\u0e19\u0e18\u0e38\u0e4c',        color: '#888888', size: 'sm', flex: 3 },
+          { type: 'text', text: treeInfo['\u0e1e\u0e31\u0e19\u0e18\u0e38\u0e4c'] || '-',           size: 'sm', flex: 5, weight: 'bold' }
+        ]},
+        { type: 'box', layout: 'horizontal', contents: [
+          { type: 'text', text: '\u0e2d\u0e32\u0e22\u0e38\u0e15\u0e49\u0e19',       color: '#888888', size: 'sm', flex: 3 },
+          { type: 'text', text: `${treeInfo['\u0e2d\u0e32\u0e22\u0e38(\u0e1b\u0e35)'] || '-'} \u0e1b\u0e35`,   size: 'sm', flex: 5 }
+        ]},
+        { type: 'box', layout: 'horizontal', contents: [
+          { type: 'text', text: '\u0e2d\u0e2d\u0e01\u0e14\u0e2d\u0e01',      color: '#888888', size: 'sm', flex: 3 },
+          { type: 'text', text: treeInfo['\u0e40\u0e14\u0e37\u0e2d\u0e19\u0e2d\u0e2d\u0e01\u0e14\u0e2d\u0e01'] || '-',      size: 'sm', flex: 5 }
+        ]},
+        { type: 'box', layout: 'horizontal', contents: [
+          { type: 'text', text: '\u0e04\u0e07\u0e40\u0e2b\u0e25\u0e37\u0e2d',      color: '#888888', size: 'sm', flex: 3 },
+          { type: 'text', text: `${remaining} \u0e25\u0e39\u0e01`,      size: 'sm', flex: 5, color: '#e53935', weight: 'bold' }
+        ]}
+      ]
+    }
+  ];
+
+  if (treePhotoUrls.length > 1) {
+    profileBody.push({ type: 'text', text: `(มีภาพประกอบทั้งหมด ${treePhotoUrls.length} รูป)`, size: 'xs', color: '#aaaaaa', align: 'center', margin: 'md' });
+  }
+
+  const profileBubble = {
+    type: 'bubble',
+    body: { type: 'box', layout: 'vertical', contents: profileBody }
+  };
+  if (treePhotoUrl) {
+    profileBubble.hero = {
+      type: 'image', url: treePhotoUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover'
+    };
+  }
+  bubbles.push(profileBubble);
+
+  // 2. การ์ดประวัติ (Timeline Cards)
+  if (harvestHistory && harvestHistory.length > 0) {
+    harvestHistory.forEach(h => {
+      const d = h.date ? new Date(h.date) : null;
+      const dateStr = d ? `${d.getDate()} ${['\u0e21.\u0e04.','\u0e01.\u0e1e.','\u0e21\u0e35.\u0e04.','\u0e40\u0e21.\u0e22.','\u0e1e.\u0e04.','\u0e21\u0e34.\u0e22.','\u0e01.\u0e04.','\u0e2a.\u0e04.','\u0e01.\u0e22.','\u0e15.\u0e04.','\u0e1e.\u0e22.','\u0e18.\u0e04.'][d.getMonth()]} ${d.getFullYear()+543}` : '-';
+      
+      const eventPhotoUrls = h.photoUrl ? h.photoUrl.split(',') : [];
+      const eventPhotoUrl = getDriveImageUrlForLine(eventPhotoUrls[0] || '');
+      
+      const historyBody = [
+        { type: 'text', text: `\ud83d\udccb ${h.reason}`, weight: 'bold', size: 'md', color: h.reason === 'เสียหาย' ? '#e53935' : '#1DB446' },
+        { type: 'text', text: dateStr, size: 'xs', color: '#888888', margin: 'sm' },
+        { type: 'separator', margin: 'md' },
+        {
+          type: 'box', layout: 'vertical', margin: 'md', spacing: 'sm',
+          contents: [
+            { type: 'box', layout: 'horizontal', contents: [
+              { type: 'text', text: 'จำนวน', color: '#888888', size: 'sm', flex: 3 },
+              { type: 'text', text: `${h.quantity} ลูก`, size: 'sm', flex: 5, weight: 'bold' }
+            ]}
+          ]
+        }
+      ];
+
+      if (h.reason === 'ตัดขาย') {
+        historyBody[3].contents.push({
+          type: 'box', layout: 'horizontal', contents: [
+            { type: 'text', text: 'เกรด', color: '#888888', size: 'sm', flex: 3 },
+            { type: 'text', text: h.grade || '-', size: 'sm', flex: 5 }
+          ]
+        });
+      }
+
+      if (eventPhotoUrls.length > 1) {
+        historyBody.push({ type: 'text', text: `(มีภาพประกอบทั้งหมด ${eventPhotoUrls.length} รูป)`, size: 'xs', color: '#aaaaaa', align: 'center', margin: 'md' });
+      }
+
+      const historyBubble = {
+        type: 'bubble',
+        body: { type: 'box', layout: 'vertical', contents: historyBody }
+      };
+
+      if (eventPhotoUrl) {
+        historyBubble.hero = {
+          type: 'image', url: eventPhotoUrl, size: 'full', aspectRatio: '20:13', aspectMode: 'cover'
+        };
+      }
+      
+      bubbles.push(historyBubble);
+    });
+  }
+
+  // ถ้าเป็นการ์ดใบเดียว (ไม่มีประวัติ) ก็ส่งแค่ bubble
+  if (bubbles.length === 1) {
+    return {
+      type: 'flex',
+      altText: `\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e15\u0e49\u0e19\u0e17\u0e38\u0e40\u0e23\u0e35\u0e22\u0e19 ${treeInfo['\u0e23\u0e2b\u0e31\u0e2a\u0e15\u0e49\u0e19']}`,
+      contents: bubbles[0]
+    };
+  }
+
   return {
     type: 'flex',
-    altText: 'ข้อมูลต้นทุเรียน',
+    altText: `\u0e02\u0e49\u0e2d\u0e21\u0e39\u0e25\u0e15\u0e49\u0e19\u0e17\u0e38\u0e40\u0e23\u0e35\u0e22\u0e19 ${treeInfo['\u0e23\u0e2b\u0e31\u0e2a\u0e15\u0e49\u0e19']}`,
+    contents: {
+      type: 'carousel',
+      contents: bubbles
+    }
+  };
+}
+
+function buildPhotoRequestFlex(isRegisterFlow) {
+  const flex = {
+    type: 'flex',
+    altText: 'กรุณาส่งรูปภาพ',
     contents: {
       type: 'bubble',
       body: {
         type: 'box',
         layout: 'vertical',
+        spacing: 'md',
         contents: [
-          { type: 'text', text: 'ข้อมูลต้นทุเรียน', weight: 'bold', size: 'xl', color: '#1DB446' },
-          { type: 'text', text: `รหัสต้น: ${treeInfo['รหัสต้น']}`, margin: 'md' },
-          { type: 'text', text: `พันธุ์: ${treeInfo['พันธุ์']}` },
-          { type: 'text', text: `ผลผลิตคงเหลือ: ${remaining} ลูก`, weight: 'bold', color: '#ff0000' }
+          { type: 'text', text: '📸 ถ่ายรูปหรือเลือกรูปภาพ', weight: 'bold', size: 'lg' },
+          { type: 'text', text: 'คุณสามารถส่งได้หลายรูป เมื่อส่งครบแล้วกรุณากดปุ่มด้านล่าง', wrap: true, color: '#666666', size: 'sm' }
+        ]
+      },
+      footer: {
+        type: 'box',
+        layout: 'vertical',
+        spacing: 'sm',
+        contents: [
+          {
+            type: 'button',
+            style: 'primary',
+            color: '#1DB446',
+            action: { type: 'message', label: 'ส่งรูปครบแล้ว', text: 'ส่งรูปครบแล้ว' }
+          }
         ]
       }
+    },
+    quickReply: {
+      items: [
+        {
+          type: 'action',
+          action: { type: 'camera', label: 'ถ่ายรูป' }
+        },
+        {
+          type: 'action',
+          action: { type: 'cameraRoll', label: 'เลือกจากคลัง' }
+        },
+        {
+          type: 'action',
+          action: { type: 'message', label: 'ส่งรูปครบแล้ว', text: 'ส่งรูปครบแล้ว' }
+        }
+      ]
     }
   };
+
+  if (isRegisterFlow) {
+    flex.quickReply.items.push({
+      type: 'action',
+      action: { type: 'message', label: 'ข้าม (ไม่ส่งรูป)', text: 'ข้าม' }
+    });
+    flex.contents.footer.contents.push({
+      type: 'button',
+      style: 'secondary',
+      action: { type: 'message', label: 'ข้าม', text: 'ข้าม' }
+    });
+  }
+
+  return flex;
 }
 
 function buildHarvestReasonFlex(treeId) {
@@ -59,6 +227,14 @@ function buildGradeSelectionFlex() {
 }
 
 function buildVarietySelectionFlex() {
+  const createRow = (v1, v2) => ({
+    type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'md',
+    contents: [
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: v1, data: `action=VARIETY&variety=${v1}` } },
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: v2, data: `action=VARIETY&variety=${v2}` } }
+    ]
+  });
+
   return {
     type: 'flex',
     altText: 'เลือกสายพันธุ์',
@@ -69,10 +245,10 @@ function buildVarietySelectionFlex() {
         layout: 'vertical',
         contents: [
           { type: 'text', text: 'เลือกสายพันธุ์', weight: 'bold', size: 'lg' },
-          { type: 'button', style: 'primary', margin: 'md', color: '#1DB446', action: { type: 'postback', label: 'หมอนทอง', data: `action=VARIETY&variety=หมอนทอง` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'ชะนี', data: `action=VARIETY&variety=ชะนี` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'ก้านยาว', data: `action=VARIETY&variety=ก้านยาว` } },
-          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'อื่นๆ', data: `action=VARIETY&variety=อื่นๆ` } }
+          createRow('หมอนทอง', 'ชะนี'),
+          createRow('ก้านยาว', 'กระดุม'),
+          createRow('พวงมณี', 'นกหยิบ'),
+          { type: 'button', style: 'secondary', margin: 'md', action: { type: 'postback', label: 'อื่นๆ', data: `action=VARIETY&variety=อื่นๆ` } }
         ]
       }
     }
@@ -80,6 +256,15 @@ function buildVarietySelectionFlex() {
 }
 
 function buildMonthSelectionFlex() {
+  const createRow = (m1, m2, m3) => ({
+    type: 'box', layout: 'horizontal', spacing: 'sm', margin: 'md',
+    contents: [
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: m1, data: `action=MONTH&month=${m1}` } },
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: m2, data: `action=MONTH&month=${m2}` } },
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: m3, data: `action=MONTH&month=${m3}` } }
+    ]
+  });
+
   return {
     type: 'flex',
     altText: 'เลือกเดือนออกดอก',
@@ -90,10 +275,10 @@ function buildMonthSelectionFlex() {
         layout: 'vertical',
         contents: [
           { type: 'text', text: 'เลือกเดือนออกดอก', weight: 'bold', size: 'lg' },
-          { type: 'button', style: 'primary', margin: 'md', color: '#1DB446', action: { type: 'postback', label: 'ม.ค.', data: `action=MONTH&month=ม.ค.` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'ก.พ.', data: `action=MONTH&month=ก.พ.` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'มี.ค.', data: `action=MONTH&month=มี.ค.` } },
-          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'อื่นๆ', data: `action=MONTH&month=อื่นๆ` } }
+          createRow('ม.ค.', 'ก.พ.', 'มี.ค.'),
+          createRow('เม.ย.', 'พ.ค.', 'มิ.ย.'),
+          createRow('ก.ค.', 'ส.ค.', 'ก.ย.'),
+          createRow('ต.ค.', 'พ.ย.', 'ธ.ค.')
         ]
       }
     }
@@ -169,7 +354,7 @@ function buildTreeRegistrationSummaryFlex(data) {
         layout: 'vertical',
         contents: [
           { type: 'text', text: 'ยืนยันการลงทะเบียนต้นไม้', weight: 'bold', size: 'lg' },
-          { type: 'text', text: `รหัสต้น: ${data.treeId}`, margin: 'md' },
+          { type: 'text', text: `(รหัสจะถูกสร้างหลังอนุมัติ)`, margin: 'md', color: '#aaaaaa' },
           { type: 'text', text: `พันธุ์: ${data.variety}` },
           { type: 'text', text: `อายุ: ${data.age} ปี` },
           { type: 'text', text: `เดือนออกดอก: ${data.flowerMonth}` }
@@ -275,15 +460,30 @@ function buildTextPromptFlex(question) {
 function buildLocationRequestFlex() {
   return {
     type: 'text',
-    text: 'กรุณาส่งตำแหน่งของต้นไม้ (Location)'
+    text: 'กรุณากดปุ่มด้านล่างเพื่อส่งตำแหน่ง (Location) ของต้นไม้ครับ 📍',
+    quickReply: {
+      items: [
+        {
+          type: 'action',
+          action: {
+            type: 'location',
+            label: 'แชร์ตำแหน่งที่ตั้ง'
+          }
+        }
+      ]
+    }
   };
 }
 
-function buildPhotoRequestFlex() {
-  return {
-    type: 'text',
-    text: 'กรุณาส่งรูปภาพ (หรือพิมพ์ "ข้าม" เพื่อดำเนินการต่อ)'
-  };
+function buildPhotoRequestFlex(message, showSkip) {
+  const msg = message || 'กรุณาถ่ายรูปแล้วส่งมาได้เลยครับ 📸';
+  const obj = { type: 'text', text: msg };
+  if (showSkip) {
+    obj.quickReply = {
+      items: [{ type: 'action', action: { type: 'message', label: 'ข้าม (ไม่ส่งรูป)', text: 'ข้าม' } }]
+    };
+  }
+  return obj;
 }
 
 function buildSuccessFlex(message) {

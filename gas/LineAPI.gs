@@ -37,10 +37,18 @@ function replyMessage(replyToken, messages) {
     payload: JSON.stringify({
       replyToken: replyToken,
       messages: messages
-    })
+    }),
+    muteHttpExceptions: true
   };
-
-  UrlFetchApp.fetch(url, options);
+  
+  const response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() !== 200) {
+    try {
+      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
+      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), 'Reply Error', response.getContentText()]);
+    } catch(e) {}
+  }
 }
 
 /**
@@ -129,6 +137,25 @@ function linkRichMenuToUser(userId, richMenuId) {
     headers: {
       'Authorization': 'Bearer ' + token
     }
+  };
+
+  UrlFetchApp.fetch(url, options);
+}
+
+/**
+ * ยกเลิกการผูก Rich Menu ของผู้ใช้ (จะกลับไปใช้ Default)
+ * @param {string} userId - The user ID
+ */
+function unlinkRichMenuFromUser(userId) {
+  const url = `https://api.line.me/v2/bot/user/${userId}/richmenu`;
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
+  
+  const options = {
+    method: 'delete',
+    headers: {
+      'Authorization': 'Bearer ' + token
+    },
+    muteHttpExceptions: true
   };
 
   UrlFetchApp.fetch(url, options);

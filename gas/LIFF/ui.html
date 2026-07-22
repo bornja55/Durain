@@ -1,0 +1,203 @@
+<!DOCTYPE html>
+
+<html lang="th"><head>
+<meta charset="utf-8"/>
+<meta content="width=device-width, initial-scale=1.0" name="viewport"/>
+<title>บ้านสวนโพรงกระต่าย - QR Scanner</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Public+Sans:wght@300;400;500;600;700;800&amp;family=Noto+Sans+Thai:wght@300;400;500;600;700&amp;family=Quicksand:wght@500;600;700&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet"/>
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    colors: {
+                        primary: "#7CB342",
+                        "on-primary": "#FFFFFF",
+                        secondary: "#F9A825",
+                        tertiary: "#A1887F",
+                        surface: "#FFFFFF",
+                        "on-surface": "#1C1B1F",
+                        "on-surface-variant": "#49454F",
+                        "surface-container": "#F5F5F5",
+                        "surface-variant": "#E7E0EC"
+                    },
+                    borderRadius: {
+                        "DEFAULT": "0.5rem",
+                        "lg": "1rem",
+                        "xl": "1.5rem",
+                        "full": "9999px"
+                    },
+                    fontFamily: {
+                        headline: ["Quicksand", "Noto Sans Thai", "sans-serif"],
+                        display: ["Quicksand", "Noto Sans Thai", "sans-serif"],
+                        body: ["Public Sans", "Noto Sans Thai", "sans-serif"],
+                        label: ["Public Sans", "Noto Sans Thai", "sans-serif"]
+                    }
+                },
+            },
+        }
+    </script>
+<style>
+        body {
+            font-family: 'Public Sans', 'Noto Sans Thai', sans-serif;
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            background-color: #000;
+        }
+        
+        .material-symbols-outlined {
+            font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24;
+        }
+
+        .scanner-overlay {
+            background: rgba(0, 0, 0, 0.4);
+            backdrop-filter: blur(2px);
+        }
+
+        .viewfinder-corner {
+            width: 40px;
+            height: 40px;
+            border-color: #7CB342;
+            position: absolute;
+        }
+
+        @keyframes scan-line {
+            0% { top: 0%; opacity: 0; }
+            10% { opacity: 1; }
+            90% { opacity: 1; }
+            100% { top: 100%; opacity: 0; }
+        }
+
+        .scan-anim-line {
+            height: 2px;
+            background: linear-gradient(to right, transparent, #7CB342, transparent);
+            position: absolute;
+            width: 100%;
+            box-shadow: 0 0 8px #7CB342;
+            animation: scan-line 3s linear infinite;
+        }
+
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.2);
+        }
+    </style>
+<style>
+    body {
+      min-height: max(884px, 100dvh);
+    }
+  </style>
+  </head>
+<body class="bg-black h-screen w-full flex flex-col">
+<!-- Camera Preview Background -->
+<div class="fixed inset-0 z-0 h-full w-full">
+<div class="w-full h-full bg-cover bg-center opacity-80 scale-110" data-alt="A realistic high-definition camera preview screen looking through a smartphone lens at a lush green durian orchard. The focus is slightly blurred on a large durian tree trunk where a QR code tag is pinned. The lighting is warm morning sunlight filtering through tropical leaves, creating a soft, dappled effect. The overall aesthetic is clean and nature-focused with a soft pastel green and warm earth tone color palette." style="background-image: url('https://lh3.googleusercontent.com/aida-public/AB6AXuCKxGnq5tQJkBWLiygV1XDxC8rkQKIRuZzTUyF3xUsAFheT2BF_61EgGQpkkjcCFaCElKL7Bc1PUk7HsAibLQUaiPuGuJ1FscK_A8JZYNcWwsP1erXBw5c6FxHbesggUp2LlE6AfSSBRb1FxuVlkrZSkaPznTulyVGQoPYD6qxYuhkK3Q16F8jnjFJj86KczZgBy4kQyFi5nLut--hqr6FFwilu9o0PznF-XdB5sorNxqwK0u7QiFNrhOP1xdOtpg5UgHjMGuMhYJUZ')"></div>
+</div>
+<!-- Top App Bar (From Shared Components JSON) -->
+<header class="fixed top-0 left-0 w-full z-50 bg-white dark:bg-surface shadow-sm dark:bg-surface-container rounded-b-xl flex justify-between items-center px-4 h-16">
+<div class="flex items-center gap-3">
+<button class="p-2 hover:bg-surface-variant/50 transition-colors duration-200 rounded-full flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="help">help</span>
+</button>
+</div>
+<h1 class="font-headline font-bold text-primary dark:text-primary text-headline-sm">บ้านสวนโพรงกระต่าย</h1>
+<div class="flex items-center">
+<button class="p-2 hover:bg-surface-variant/50 transition-colors duration-200 rounded-full flex items-center justify-center text-on-surface-variant">
+<span class="material-symbols-outlined" data-icon="close">close</span>
+</button>
+</div>
+</header>
+<!-- Main Scanner UI Content -->
+<main class="relative flex-1 flex flex-col items-center justify-center z-10">
+<!-- Viewfinder Overlay Structure -->
+<div class="w-full h-full flex flex-col items-center justify-center relative">
+<!-- Darkened outer areas -->
+<div class="absolute top-0 left-0 right-0 h-[20%] scanner-overlay"></div>
+<div class="absolute bottom-0 left-0 right-0 h-[30%] scanner-overlay"></div>
+<div class="absolute top-[20%] left-0 w-[10%] h-[50%] scanner-overlay"></div>
+<div class="absolute top-[20%] right-0 w-[10%] h-[50%] scanner-overlay"></div>
+<!-- Viewfinder Frame -->
+<div class="relative w-[80vw] max-w-[320px] aspect-square">
+<!-- Corners -->
+<div class="viewfinder-corner top-0 left-0 border-t-4 border-l-4 rounded-tl-xl"></div>
+<div class="viewfinder-corner top-0 right-0 border-t-4 border-r-4 rounded-tr-xl"></div>
+<div class="viewfinder-corner bottom-0 left-0 border-b-4 border-l-4 rounded-bl-xl"></div>
+<div class="viewfinder-corner bottom-0 right-0 border-b-4 border-r-4 rounded-br-xl"></div>
+<!-- Scan Animation Line -->
+<div class="scan-anim-line"></div>
+</div>
+<!-- Instruction Text -->
+<div class="mt-8 px-6 py-3 rounded-full glass-panel flex items-center gap-2">
+<span class="material-symbols-outlined text-white text-sm" data-icon="info">info</span>
+<p class="text-white text-sm font-medium tracking-wide">
+                    หันกล้องไปที่ QR Code บนต้นทุเรียนเพื่อสแกน
+                </p>
+</div>
+<!-- Interaction Buttons (Floating above bottom nav) -->
+<div class="absolute bottom-32 flex gap-8">
+<button class="w-16 h-16 rounded-full glass-panel flex flex-col items-center justify-center text-white active:scale-90 transition-transform" id="torch-toggle">
+<span class="material-symbols-outlined text-3xl" data-icon="bolt">bolt</span>
+<span class="text-[10px] mt-1 font-bold">ไฟฉาย</span>
+</button>
+<button class="w-16 h-16 rounded-full glass-panel flex flex-col items-center justify-center text-white active:scale-90 transition-transform" id="camera-switch">
+<span class="material-symbols-outlined text-3xl" data-icon="flip_camera_ios">flip_camera_ios</span>
+<span class="text-[10px] mt-1 font-bold">สลับกล้อง</span>
+</button>
+</div>
+</div>
+</main>
+<!-- Bottom Navigation Bar (From Shared Components JSON) -->
+<nav class="fixed bottom-0 left-0 w-full flex justify-around items-center px-2 py-3 bg-white dark:bg-surface border-t border-surface-variant/20 shadow-[0_-2px_10px_rgba(0,0,0,0.05)] z-50 rounded-t-xl">
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="home">home</span>
+<span class="font-label text-label-small">หน้าหลัก</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="park">park</span>
+<span class="font-label text-label-small">ต้นไม้</span>
+</a>
+<!-- Active Tab: สแกน (Scan) -->
+<a class="flex flex-col items-center justify-center text-primary dark:text-primary font-bold bg-primary/10 rounded-xl px-3 py-1 active:scale-95 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="qr_code_scanner" style="font-variation-settings: 'FILL' 1;">qr_code_scanner</span>
+<span class="font-label text-label-small">สแกน</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="analytics">analytics</span>
+<span class="font-label text-label-small">สรุปผล</span>
+</a>
+<a class="flex flex-col items-center justify-center text-on-surface-variant dark:text-on-surface-variant hover:bg-surface-variant/30 active:scale-95 transition-all duration-200" href="#">
+<span class="material-symbols-outlined" data-icon="settings">settings</span>
+<span class="font-label text-label-small">ตั้งค่า</span>
+</a>
+</nav>
+<script>
+        // Simple micro-interactions
+        const torchBtn = document.getElementById('torch-toggle');
+        let torchActive = false;
+        torchBtn.addEventListener('click', () => {
+            torchActive = !torchActive;
+            if(torchActive) {
+                torchBtn.classList.add('bg-primary/40', 'border-primary');
+                torchBtn.querySelector('span:first-child').style.fontVariationSettings = "'FILL' 1";
+            } else {
+                torchBtn.classList.remove('bg-primary/40', 'border-primary');
+                torchBtn.querySelector('span:first-child').style.fontVariationSettings = "'FILL' 0";
+            }
+        });
+
+        // Trigger a vibration-like effect on successful "mock" scan or button press
+        const cameraSwitch = document.getElementById('camera-switch');
+        cameraSwitch.addEventListener('click', () => {
+            document.body.style.transition = 'background-color 0.1s';
+            document.body.style.backgroundColor = 'rgba(124, 179, 66, 0.2)';
+            setTimeout(() => {
+                document.body.style.backgroundColor = 'transparent';
+            }, 100);
+        });
+    </script>
+</body></html>

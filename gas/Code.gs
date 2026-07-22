@@ -50,7 +50,17 @@ function doPost(e) {
 
 function doGet(e) {
   try {
-    const page = (e && e.parameter && e.parameter.page) ? e.parameter.page : 'scanner';
+    let page = 'scanner';
+    if (e && e.parameter) {
+      if (e.parameter.page) {
+        page = e.parameter.page;
+      } else if (e.parameter['liff.state']) {
+        const stateStr = decodeURIComponent(e.parameter['liff.state']);
+        if (stateStr.indexOf('page=dashboard') !== -1) {
+          page = 'dashboard';
+        }
+      }
+    }
     
     if (page === 'dashboard') {
     // Return Dashboard Web App
@@ -58,15 +68,17 @@ function doGet(e) {
     template.liffId = getConfig('LIFF_ID');
     return template.evaluate()
       .setTitle('ระบบจัดการสวนทุเรียน')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } else {
     // Default to LIFF Scanner
     const template = HtmlService.createTemplateFromFile('LIFF/index');
     template.liffId = getConfig('LIFF_ID');
     return template.evaluate()
       .setTitle('สแกน QR ต้นทุเรียน')
-      .addMetaTag('viewport', 'width=device-width, initial-scale=1');
-    }
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  }
   } catch (err) {
     try {
       const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
@@ -80,7 +92,15 @@ function doGet(e) {
 function handleFollow(event) {
   const userId = event.source.userId;
   const profile = getProfile(userId);
-  registerUser(userId, profile.displayName || 'Unknown', 'คนสวน');
+  
+  let role = getUserRole(userId);
+  if (!role) {
+    role = 'Customer';
+    registerUser(userId, profile.displayName || 'Unknown', role);
+  }
+  
+  // ผูก Rich Menu ตาม Role (ป้องกันการเขียนทับเมนูของผู้ใช้เดิม)
+  syncUserRichMenu(userId, role);
   
   replyMessage(event.replyToken, {
     type: 'text',
@@ -91,8 +111,26 @@ function handleFollow(event) {
 function handlePostback(event) {
   const userId = event.source.userId;
   const data = event.postback.data;
-  const params = new URLSearchParams(data);
-  const action = params.get('action');
+  
+  // Ensure user is registered even if their first interaction is a button click
+  let role = getUserRole(userId);
+  if (!role) {
+    try {
+      const profile = getProfile(userId);
+      role = 'Customer';
+      registerUser(userId, profile.displayName || 'Unknown', role);
+      syncUserRichMenu(userId, role);
+    } catch(e) {}
+  }
+  
+  // Custom parser since URLSearchParams is not fully supported in all GAS environments
+  const params = {};
+  data.split('&').forEach(pair => {
+    const [key, value] = pair.split('=');
+    if (key) params[key] = decodeURIComponent(value || '');
+  });
+  
+  const action = params['action'];
   
   if (action === 'CANCEL') {
     clearState(userId);
@@ -101,8 +139,8 @@ function handlePostback(event) {
   }
   
   if (action === 'SCAN_RESULT') {
-    const treeId = params.get('tree');
-    const flow = params.get('flow');
+    const treeId = params['tree'];
+    const flow = params['flow'];
     
     const treeInfo = getTreeInfo(treeId);
     if (!treeInfo) {
@@ -110,15 +148,20 @@ function handlePostback(event) {
       return;
     }
     
-    const remaining = getRemainingFruits(getActiveSeason(), treeId);
-    const msgs = [buildTreeInfoFlex(treeInfo, remaining)];
+    const seasonId = getActiveSeason();
+    const remaining = getRemainingFruits(seasonId, treeId);
+    const harvestHistory = getHarvestHistory(seasonId, treeId, 5);
+    const msgs = [buildTreeInfoFlex(treeInfo, remaining, harvestHistory)];
     
-    if (flow === 'harvest') {
-      msgs.push(buildHarvestReasonFlex(treeId));
-      setState(userId, { action: 'HARVEST', data: { treeId: treeId } });
-    } else if (flow === 'production') {
-      msgs.push(buildTextPromptFlex('กรุณาพิมพ์จำนวนผลผลิตทั้งหมดที่นับได้'));
-      setState(userId, { step: 'WAIT_QUANTITY', action: 'PRODUCTION', data: { treeId: treeId } });
+    const role = getUserRole(userId);
+    if (role !== 'Customer') {
+      if (flow === 'harvest') {
+        msgs.push(buildHarvestReasonFlex(treeId));
+        setState(userId, { action: 'HARVEST', data: { treeId: treeId } });
+      } else if (flow === 'production') {
+        msgs.push(buildTextPromptFlex('กรุณาพิมพ์จำนวนผลผลิตทั้งหมดที่นับได้'));
+        setState(userId, { step: 'WAIT_QUANTITY', action: 'PRODUCTION', data: { treeId: treeId } });
+      }
     }
     replyMessage(event.replyToken, msgs);
     return;
@@ -127,55 +170,76 @@ function handlePostback(event) {
   const state = getState(userId) || { data: {} };
   
   if (action === 'HARVEST_REASON') {
-    state.data.reason = params.get('reason');
+    state.data.reason = params['reason'];
     state.step = 'WAIT_QUANTITY';
     setState(userId, state);
     replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์จำนวนที่เก็บเกี่ยว'));
   }
   else if (action === 'GRADE') {
-    state.data.grade = params.get('grade');
+    state.data.grade = params['grade'];
     state.step = 'WAIT_WEIGHT';
     setState(userId, state);
     replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์น้ำหนักรวม (กิโลกรัม)'));
   }
   else if (action === 'VARIETY') {
-    state.data.variety = params.get('variety');
-    state.step = 'WAIT_AGE';
-    setState(userId, state);
-    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์อายุต้น (ปี)'));
+    const variety = params['variety'];
+    if (variety === 'อื่นๆ') {
+      state.step = 'WAIT_OTHER_VARIETY';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์ชื่อสายพันธุ์ครับ'));
+    } else {
+      state.data.variety = variety;
+      state.step = 'WAIT_AGE';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์อายุต้น (ปี)'));
+    }
   }
   else if (action === 'MONTH') {
-    state.data.flowerMonth = params.get('month');
-    state.step = 'WAIT_LOCATION';
+    state.data.flowerMonth = params['month'];
+    state.step = 'WAIT_QUANTITY';
     setState(userId, state);
-    replyMessage(event.replyToken, buildLocationRequestFlex());
+    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์จำนวนลูก(หรือดอก) ปัจจุบัน (หากไม่มีให้ใส่ 0)'));
   }
   else if (action === 'CONFIRM') {
-    const type = params.get('type');
+    const type = params['type'];
     const profile = getProfile(userId);
     let queueType = '';
     
     if (type === 'harvest') queueType = 'ตัดจำหน่าย';
     else if (type === 'production') queueType = 'บันทึกผลผลิต';
-    else if (type === 'register') queueType = 'ลงทะเบียนต้นไม้';
+    else if (type === 'register') {
+      queueType = 'ลงทะเบียนต้นไม้';
+      // Generate ID right away so worker knows it!
+      const newTreeId = generateNextTreeId();
+      state.data.treeId = newTreeId;
+    }
     
-    addToPendingQueue(queueType, state.data.treeId, state.data, userId, profile.displayName, state.data.photoUrl);
+    const photoUrlString = state.data.photoUrls ? state.data.photoUrls.join(',') : (state.data.photoUrl || '');
+    addToPendingQueue(queueType, state.data.treeId, state.data, userId, profile.displayName, photoUrlString);
     clearState(userId);
     
-    replyMessage(event.replyToken, buildSuccessFlex('บันทึกข้อมูลและส่งขออนุมัติเรียบร้อยแล้ว'));
+    if (type === 'register') {
+      replyMessage(event.replyToken, buildSuccessFlex(`บันทึกข้อมูลและส่งขออนุมัติเรียบร้อยแล้ว\n\n⚠️ รหัสต้นไม้ของคุณคือ: ${state.data.treeId}\n\nกรุณาจดรหัสนี้และนำไปผูกติดกับต้นไม้ครับ!`));
+    } else {
+      replyMessage(event.replyToken, buildSuccessFlex('บันทึกข้อมูลและส่งขออนุมัติเรียบร้อยแล้ว'));
+    }
   }
   else if (action === 'APPROVE') {
-    const itemId = params.get('id');
+    const itemId = params['id'];
     const profile = getProfile(userId);
-    const success = approveItem(itemId, profile.displayName);
-    if (success) {
-      replyMessage(event.replyToken, buildSuccessFlex('อนุมัติรายการเรียบร้อย'));
+    const result = approveItem(itemId, profile.displayName);
+    if (result && result.success) {
+      if (result.type === 'register') {
+        replyMessage(event.replyToken, buildSuccessFlex(`อนุมัติเรียบร้อย!\nต้นไม้ใหม่ได้รหัส: ${result.newTreeId}`));
+      } else {
+        replyMessage(event.replyToken, buildSuccessFlex('อนุมัติรายการเรียบร้อย'));
+      }
     } else {
       replyMessage(event.replyToken, buildErrorFlex('ไม่พบรายการหรือถูกอนุมัติไปแล้ว'));
     }
   }
   else if (action === 'REJECT_START') {
-    const itemId = params.get('id');
+    const itemId = params['id'];
     state.action = 'REJECT';
     state.step = 'WAIT_REASON';
     state.data.itemId = itemId;
@@ -194,7 +258,7 @@ function handlePostback(event) {
     replyMessage(event.replyToken, buildDashboardMenuFlex());
   }
   else if (action === 'DASHBOARD_VIEW') {
-    const viewType = params.get('type');
+    const viewType = params['type'];
     let dashData;
     let title;
     const seasonId = getActiveSeason();
@@ -206,22 +270,34 @@ function handlePostback(event) {
   }
   else if (action === 'REGISTER_TREE') {
     state.action = 'REGISTER_TREE';
-    state.step = 'WAIT_TREE_ID';
+    state.step = 'WAIT_VARIETY';
+    state.data = { treeId: 'AUTO_GENERATED' };
     setState(userId, state);
-    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์รหัสต้น (เช่น 001)'));
+    replyMessage(event.replyToken, buildVarietySelectionFlex());
   }
 }
 
 function handleTextMessage(event) {
   const userId = event.source.userId;
   const text = event.message.text.trim();
+  
+  // Allow user to cancel at any time by typing "ยกเลิก"
+  if (text === 'ยกเลิก' || text === 'cancel') {
+    clearState(userId);
+    replyMessage(event.replyToken, buildSuccessFlex('ยกเลิกรายการเรียบร้อยแล้ว คุณสามารถเริ่มทำรายการใหม่ได้เลยครับ'));
+    return;
+  }
+  
   const state = getState(userId);
   
   if (!state) {
     // If user is not in a flow, ensure they are registered
-    if (!getUserRole(userId)) {
+    let role = getUserRole(userId);
+    if (!role) {
       const profile = getProfile(userId);
-      registerUser(userId, profile.displayName || 'Unknown', 'คนสวน');
+      role = 'Customer';
+      registerUser(userId, profile.displayName || 'Unknown', role);
+      syncUserRichMenu(userId, role);
     }
     // Default reply
     replyMessage(event.replyToken, {
@@ -245,7 +321,7 @@ function handleTextMessage(event) {
       } else {
         state.step = 'WAIT_PHOTO';
         setState(userId, state);
-        replyMessage(event.replyToken, buildPhotoRequestFlex());
+        replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปผลไม้ที่เสียหาย 📸'));
       }
     }
     else if (state.step === 'WAIT_WEIGHT') {
@@ -258,10 +334,7 @@ function handleTextMessage(event) {
       state.data.price = parseFloat(text);
       state.step = 'WAIT_PHOTO';
       setState(userId, state);
-      replyMessage(event.replyToken, buildPhotoRequestFlex());
-    }
-    else if (state.step === 'WAIT_PHOTO' && text === 'ข้าม') {
-      replyMessage(event.replyToken, buildHarvestSummaryFlex(state.data));
+      replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปที่เห็นตาชั่งน้ำหนัก 📸'));
     }
   }
   else if (state.action === 'PRODUCTION') {
@@ -271,17 +344,46 @@ function handleTextMessage(event) {
     }
   }
   else if (state.action === 'REGISTER_TREE') {
-    if (state.step === 'WAIT_TREE_ID') {
-      state.data.treeId = text;
-      state.step = 'WAIT_VARIETY';
+    if (state.step === 'WAIT_OTHER_VARIETY') {
+      state.data.variety = text;
+      state.step = 'WAIT_AGE';
       setState(userId, state);
-      replyMessage(event.replyToken, buildVarietySelectionFlex());
+      replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์อายุต้น (ปี)'));
     }
     else if (state.step === 'WAIT_AGE') {
       state.data.age = parseInt(text, 10);
       state.step = 'WAIT_MONTH';
       setState(userId, state);
       replyMessage(event.replyToken, buildMonthSelectionFlex());
+    }
+    else if (state.step === 'WAIT_QUANTITY') {
+      state.data.quantity = parseInt(text, 10) || 0;
+      state.step = 'WAIT_LOCATION';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildLocationRequestFlex());
+    }
+    else if (state.step === 'WAIT_PHOTO') {
+      if (text === 'ข้าม') {
+        if (state.action === 'HARVEST') {
+          replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ห้ามข้าม กรุณาถ่ายรูปน้ำหนักตาชั่ง หรือรูปผลไม้ที่เสียหายทุกกรณีครับ'));
+          return;
+        }
+        replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
+      } 
+      else if (text === 'ส่งรูปครบแล้ว') {
+        const photoCount = state.data.photoUrls ? state.data.photoUrls.length : 0;
+        
+        if (photoCount === 0 && state.action === 'HARVEST') {
+          replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ยังไม่ได้ส่งรูปเลยครับ กรุณาแนบรูปภาพก่อนกดส่งรูปครบแล้ว'));
+          return;
+        }
+        
+        if (state.action === 'HARVEST') {
+          replyMessage(event.replyToken, buildHarvestSummaryFlex(state.data));
+        } else if (state.action === 'REGISTER_TREE') {
+          replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
+        }
+      }
     }
   }
   else if (state.action === 'REJECT' && state.step === 'WAIT_REASON') {
@@ -295,13 +397,24 @@ function handleImageMessage(event) {
   const userId = event.source.userId;
   const state = getState(userId);
   if (state && state.step === 'WAIT_PHOTO') {
-    const photoUrl = savePhotoToDrive(event.message.id, getActiveSeason(), state.data.treeId);
-    state.data.photoUrl = photoUrl;
+    const photoUrl = savePhotoToDrive(event.message.id, getActiveSeason(), state.data.treeId || 'NEW_TREE');
+    
+    // Initialize array if not exists
+    if (!state.data.photoUrls) state.data.photoUrls = [];
+    state.data.photoUrls.push(photoUrl);
+    
     setState(userId, state);
     
-    if (state.action === 'HARVEST') {
-      replyMessage(event.replyToken, buildHarvestSummaryFlex(state.data));
-    }
+    // Reply that we received the photo and wait for them to finish
+    replyMessage(event.replyToken, {
+      type: 'text',
+      text: `📸 รับรูปที่ ${state.data.photoUrls.length} แล้ว หากมีรูปเพิ่มเติมสามารถส่งมาได้เลยครับ\n\nหากส่งครบแล้ว กรุณากดปุ่มด้านล่าง 👇`,
+      quickReply: {
+        items: [
+          { type: 'action', action: { type: 'message', label: 'ส่งรูปครบแล้ว', text: 'ส่งรูปครบแล้ว' } }
+        ]
+      }
+    });
   }
 }
 
@@ -311,7 +424,8 @@ function handleLocationMessage(event) {
   if (state && state.action === 'REGISTER_TREE' && state.step === 'WAIT_LOCATION') {
     state.data.lat = event.message.latitude;
     state.data.lng = event.message.longitude;
+    state.step = 'WAIT_PHOTO';
     setState(userId, state);
-    replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
+    replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปต้นไม้แล้วส่งมาได้เลยครับ 📸', true));
   }
 }

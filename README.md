@@ -1,3 +1,5 @@
+*อ่านคู่มือเป็นภาษาอื่น: [🇹🇭 ภาษาไทย](README.md), [🇬🇧 English](README_EN.md)*
+
 # 🌳 Durian Farm Management System (ระบบจัดการบ้านสวนโพรงกระต่าย)
 
 ![Backend](https://img.shields.io/badge/Backend-Google_Apps_Script-0F9D58?style=for-the-badge&logo=google)

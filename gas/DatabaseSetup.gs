@@ -18,7 +18,7 @@ function initializeDatabase() {
   // 2. ต้นไม้
   setupSheet(ss, 'ต้นไม้', [
     'รหัสต้น', 'พันธุ์', 'อายุ(ปี)', 'Latitude', 'Longitude', 
-    'เดือนออกดอก', 'สถานะ', 'QR Code URL', 'วันที่ลงทะเบียน', 'ลงทะเบียนโดย'
+    'เดือนออกดอก', 'สถานะ', 'QR Code URL', 'วันที่ลงทะเบียน', 'ลงทะเบียนโดย', 'รูปภาพ URL'
   ]);
   setValidation(ss.getSheetByName('ต้นไม้'), 'G2:G', ['active', 'ปลดระวาง']);
   setValidation(ss.getSheetByName('ต้นไม้'), 'B2:B', ['หมอนทอง', 'ชะนี', 'ก้านยาว', 'กระดุม', 'พวงมณี', 'นกหยิบ', 'อื่นๆ']);
