@@ -495,9 +495,29 @@
         wrapper.appendChild(btn);
       }
 
+      if (currentUser && (currentUser.role === 'admin' || currentUser.role === 'เจ้าของ')) {
+        const delBtn = document.createElement('button');
+        delBtn.className = 'absolute top-2 right-2 bg-red-500/80 hover:bg-red-600 text-white w-7 h-7 rounded-full flex items-center justify-center shadow transition-colors z-10';
+        delBtn.innerHTML = '<span class="material-symbols-rounded text-sm">delete</span>';
+        delBtn.onclick = (e) => {
+          e.stopPropagation();
+          deletePhoto(index);
+        };
+        wrapper.appendChild(delBtn);
+      }
+
       container.appendChild(wrapper);
     });
   }
+
+  window.deletePhoto = function(index) {
+    if (!confirm('ยืนยันการลบรูปภาพนี้? (รูปจะถูกลบเมื่อกดบันทึก)')) return;
+    const rawUrl = document.getElementById('editPhotoUrl').value || '';
+    const urls = rawUrl.split(',').filter(u => u.trim() !== '');
+    urls.splice(index, 1);
+    document.getElementById('editPhotoUrl').value = urls.join(',');
+    renderPhotoGallery();
+  };
 
   function setHeroImage(index) {
     const rawUrl = document.getElementById('editPhotoUrl').value || '';
