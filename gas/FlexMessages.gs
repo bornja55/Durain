@@ -378,8 +378,9 @@ function formatPendingData(jsonString) {
     let result = '';
     if (data.variety) result += `พันธุ์: ${data.variety}\n`;
     if (data.age) result += `อายุ: ${data.age} ปี\n`;
-    if (data.flowerMonth) result += `ดือนออกดอก: ${data.flowerMonth}\n`;
+    if (data.flowerMonth) result += `เดือนออกดอก: ${data.flowerMonth}\n`;
     if (data.fruitCount) result += `จำนวน: ${data.fruitCount}\n`;
+    if (data.quantity) result += `จำนวน(ดอก/ลูก): ${data.quantity}\n`;
     if (data.grade) result += `เกรด: ${data.grade}\n`;
     if (data.weight) result += `น้ำหนัก: ${data.weight} กก.\n`;
     if (data.reason) result += `สาเหตุ: ${data.reason}\n`;
@@ -391,7 +392,17 @@ function formatPendingData(jsonString) {
 
 function buildApprovalCarouselFlex(items) {
   const bubbles = items.map(item => {
-    return {
+    let requestDate = item['วันที่บันทึก'];
+    let dateString = '-';
+    if (requestDate) {
+      try {
+        dateString = Utilities.formatDate(new Date(requestDate), "Asia/Bangkok", "dd/MM/yyyy HH:mm");
+      } catch(e) {
+        dateString = requestDate.toString();
+      }
+    }
+    
+    const bubble = {
       type: 'bubble',
       body: {
         type: 'box',
@@ -400,6 +411,7 @@ function buildApprovalCarouselFlex(items) {
           { type: 'text', text: `ประเภท: ${item['ประเภท']}`, weight: 'bold', size: 'md' },
           { type: 'text', text: `รหัสต้น: ${item['รหัสต้น']}` },
           { type: 'text', text: `ผู้บันทึก: ${item['บันทึกโดย']}` },
+          { type: 'text', text: `วันที่ขอ: ${dateString}`, size: 'xs', color: '#888888' },
           { type: 'text', text: `รายละเอียด:\n${formatPendingData(item['ข้อมูล JSON'])}`, wrap: true, size: 'xs', margin: 'sm' }
         ]
       },
@@ -412,6 +424,21 @@ function buildApprovalCarouselFlex(items) {
         ]
       }
     };
+    
+    if (item['รูปภาพ']) {
+      const imgUrl = item['รูปภาพ'].split(',')[0].trim();
+      if (imgUrl.startsWith('http')) {
+        bubble.hero = {
+          type: 'image',
+          url: imgUrl,
+          size: 'full',
+          aspectRatio: '20:13',
+          aspectMode: 'cover'
+        };
+      }
+    }
+    
+    return bubble;
   });
 
   return {
