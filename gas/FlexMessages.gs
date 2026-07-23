@@ -372,6 +372,23 @@ function buildTreeRegistrationSummaryFlex(data) {
   };
 }
 
+function formatPendingData(jsonString) {
+  try {
+    const data = JSON.parse(jsonString);
+    let result = '';
+    if (data.variety) result += `พันธุ์: ${data.variety}\n`;
+    if (data.age) result += `อายุ: ${data.age} ปี\n`;
+    if (data.flowerMonth) result += `ดือนออกดอก: ${data.flowerMonth}\n`;
+    if (data.fruitCount) result += `จำนวน: ${data.fruitCount}\n`;
+    if (data.grade) result += `เกรด: ${data.grade}\n`;
+    if (data.weight) result += `น้ำหนัก: ${data.weight} กก.\n`;
+    if (data.reason) result += `สาเหตุ: ${data.reason}\n`;
+    return result.trim() || '-';
+  } catch(e) {
+    return '-';
+  }
+}
+
 function buildApprovalCarouselFlex(items) {
   const bubbles = items.map(item => {
     return {
@@ -383,7 +400,7 @@ function buildApprovalCarouselFlex(items) {
           { type: 'text', text: `ประเภท: ${item['ประเภท']}`, weight: 'bold', size: 'md' },
           { type: 'text', text: `รหัสต้น: ${item['รหัสต้น']}` },
           { type: 'text', text: `ผู้บันทึก: ${item['บันทึกโดย']}` },
-          { type: 'text', text: `รายละเอียด: ${item['ข้อมูล JSON']}`, wrap: true, size: 'xs', margin: 'sm' }
+          { type: 'text', text: `รายละเอียด:\n${formatPendingData(item['ข้อมูล JSON'])}`, wrap: true, size: 'xs', margin: 'sm' }
         ]
       },
       footer: {

@@ -1,16 +1,20 @@
 <!DOCTYPE html>
 <html>
+
 <head>
   <base target="_top">
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>บ้านสวนโพรงกระต่าย - ระบบจัดการสวนทุเรียน</title>
-  
+
   <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&family=Quicksand:wght@500;600;700&display=swap" rel="stylesheet">
-  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0" rel="stylesheet" />
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"/>
-  
+  <link
+    href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@300;400;500;600;700&family=Quicksand:wght@500;600;700&display=swap"
+    rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Rounded:opsz,wght,FILL,GRAD@24,400,1,0"
+    rel="stylesheet" />
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+
   <script>
     tailwind.config = {
       theme: {
@@ -38,10 +42,12 @@
   </script>
   <?!= HtmlService.createHtmlOutputFromFile('Dashboard.css').getContent(); ?>
 </head>
+
 <body class="bg-background text-gray-800 font-sans antialiased min-h-screen flex flex-col">
 
   <!-- Loading Screen -->
-  <div id="loading" class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center hidden">
+  <div id="loading"
+    class="fixed inset-0 bg-white/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center hidden">
     <div class="w-12 h-12 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
     <p id="loadingText" class="mt-4 text-primary font-medium">กำลังโหลด...</p>
   </div>
@@ -54,12 +60,14 @@
       </div>
       <h2 class="font-headline text-2xl font-bold text-gray-800 mb-2">เข้าสู่ระบบจัดการสวน</h2>
       <p class="text-gray-500 text-sm mb-6">รหัสผ่านเริ่มต้นคือ 1234</p>
-      
+
       <div class="mb-6">
-        <input type="password" id="pinInput" placeholder="รหัส PIN" class="w-full px-4 py-3 text-center text-xl tracking-[0.5em] font-mono bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary focus:bg-white transition-all">
+        <input type="password" id="pinInput" placeholder="รหัส PIN"
+          class="w-full px-4 py-3 text-center text-xl tracking-[0.5em] font-mono bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary focus:bg-white transition-all">
       </div>
-      
-      <button onclick="handleLogin()" class="w-full py-3 bg-primary hover:bg-[#689f38] text-white rounded-xl font-medium transition-colors shadow-sm active:scale-95">
+
+      <button onclick="AuthVM.handleLogin()"
+        class="w-full py-3 bg-primary hover:bg-[#689f38] text-white rounded-xl font-medium transition-colors shadow-sm active:scale-95">
         เข้าสู่ระบบ
       </button>
       <p id="loginError" class="text-danger text-sm mt-4 hidden"></p>
@@ -79,7 +87,7 @@
 
   <!-- Main App -->
   <div id="app" class="hidden flex-1 flex flex-col h-screen overflow-hidden">
-    
+
     <!-- Top App Bar -->
     <header class="bg-white px-6 py-4 flex items-center justify-between shadow-sm z-10 shrink-0">
       <div class="flex items-center gap-2 text-primary">
@@ -94,60 +102,93 @@
 
     <!-- Main Content Area with Sidebar/Tabs -->
     <div class="flex flex-1 overflow-hidden flex-col sm:flex-row">
-      
+
       <!-- Side Navigation (Desktop) / Bottom Nav (Mobile) -->
-      <nav class="bg-white w-full sm:w-64 border-t sm:border-t-0 sm:border-r border-gray-100 shrink-0 flex flex-row sm:flex-col sm:p-4 z-10 order-last sm:order-first justify-around sm:justify-start">
+      <nav
+        class="bg-white w-full sm:w-64 border-t sm:border-t-0 sm:border-r border-gray-100 shrink-0 flex flex-row sm:flex-col sm:p-4 z-10 order-last sm:order-first justify-around sm:justify-start">
         <div class="flex sm:flex-col gap-2 w-full">
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group active" onclick="switchTab('overview', this)">
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group active"
+            onclick="switchTab('overview', this)">
             <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">dashboard</span>
-            <span class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">ภาพรวม</span>
-          </button>
-          
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group" onclick="switchTab('map', this)">
-            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">map</span>
-            <span class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">แผนที่</span>
-          </button>
-          
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center justify-between px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group relative" onclick="switchTab('pending', this)">
-            <div class="flex flex-col sm:flex-row items-center gap-1 sm:gap-4 w-full sm:w-auto mx-auto sm:mx-0">
-              <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">fact_check</span>
-              <span class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">รออนุมัติ</span>
-            </div>
-            <span id="pendingBadge" class="absolute top-1 right-1 sm:static bg-secondary text-white text-[10px] sm:text-xs font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
-          </button>
-          
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group" onclick="switchTab('trees', this)">
-            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">forest</span>
-            <span class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">ต้นไม้</span>
+            <span
+              class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">ภาพรวม</span>
           </button>
 
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group" onclick="switchTab('income', this)">
-            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">payments</span>
-            <span class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">รายได้</span>
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group"
+            onclick="switchTab('map', this)">
+            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">map</span>
+            <span
+              class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">แผนที่</span>
           </button>
-          
-          <button class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group" onclick="switchTab('users', this)">
+
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center justify-between px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group relative"
+            onclick="switchTab('pending', this)">
+            <div class="flex flex-col sm:flex-row items-center gap-1 sm:gap-4 w-full sm:w-auto mx-auto sm:mx-0">
+              <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">fact_check</span>
+              <span
+                class="font-medium text-[10px] sm:text-base group-[.active]:font-bold group-[.active]:text-primary">รออนุมัติ</span>
+            </div>
+            <span id="pendingBadge"
+              class="absolute top-1 right-1 sm:static bg-secondary text-white text-[10px] sm:text-xs font-bold px-1.5 py-0.5 rounded-full hidden">0</span>
+          </button>
+
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group"
+            onclick="switchTab('trees', this)">
+            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">forest</span>
+            <span
+              class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">ต้นไม้</span>
+          </button>
+
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group"
+            onclick="switchTab('income', this)">
+            <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">payments</span>
+            <span
+              class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">รายได้</span>
+          </button>
+
+          <button
+            class="tab-btn flex-1 sm:w-full flex flex-col sm:flex-row items-center gap-1 sm:gap-4 px-2 py-3 rounded-2xl text-gray-500 hover:bg-primary/5 hover:text-primary transition-colors group"
+            onclick="switchTab('users', this)">
             <span class="material-symbols-rounded text-2xl group-[.active]:text-primary">group</span>
-            <span class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">ผู้ใช้</span>
+            <span
+              class="font-medium text-[10px] sm:text-base whitespace-nowrap group-[.active]:font-bold group-[.active]:text-primary">ผู้ใช้</span>
           </button>
         </div>
       </nav>
 
       <!-- Content Views -->
       <main class="flex-1 overflow-y-auto p-4 sm:p-8 relative bg-background">
-        
+
         <!-- Tab: ภาพรวม -->
         <section id="tab-overview" class="tab-content active h-full flex flex-col gap-6">
           <!-- Greeting Section -->
-          <div class="flex items-center justify-between mb-2">
+          <div class="flex items-start sm:items-center justify-between mb-2">
             <div>
               <h2 class="text-2xl font-headline font-bold text-gray-800" id="greetingText">สวัสดี! 🐰</h2>
               <p class="text-gray-500 mt-1">วันนี้สวนทุเรียนของคุณดูสดใสมาก</p>
             </div>
+            <!-- Weather & Date Widget -->
+            <div class="bg-white px-4 py-2 rounded-2xl shadow-sm border border-gray-100 flex items-center gap-3">
+              <div class="text-right">
+                <p class="text-xs font-bold text-gray-400 uppercase tracking-wider" id="widgetDate">--</p>
+                <p class="font-bold text-gray-800 text-sm" id="widgetWeatherText">กำลังโหลด...</p>
+              </div>
+              <div class="flex items-center gap-1">
+                <span class="text-2xl font-black text-amber-500" id="widgetTemp">--°</span>
+                <span class="material-symbols-rounded text-amber-500 text-3xl" id="widgetWeatherIcon"
+                  style="font-variation-settings: 'FILL' 1;">partly_cloudy_day</span>
+              </div>
+            </div>
           </div>
 
           <!-- Season Management (Owner/Admin only) -->
-          <div id="seasonManagementCard" class="bg-white rounded-xl p-4 shadow-soft mb-4 flex flex-row items-center justify-between hidden border-l-4 border-primary">
+          <div id="seasonManagementCard"
+            class="bg-white rounded-xl p-4 shadow-sm mb-4 flex flex-row items-center justify-between hidden border-l-4 border-primary">
             <div class="flex items-center gap-3">
               <span class="material-symbols-rounded text-primary text-2xl">calendar_month</span>
               <div class="flex items-baseline gap-2">
@@ -155,32 +196,44 @@
                 <span class="text-xl font-black text-gray-800" id="currentSeasonDisplay">-</span>
               </div>
             </div>
-            <button onclick="openSeasonModal()" class="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-bold rounded-lg transition-colors text-sm">
+            <button onclick="openSeasonModal()"
+              class="px-4 py-2 bg-primary/10 hover:bg-primary/20 text-primary font-bold rounded-lg transition-colors text-sm">
               เปิด/เปลี่ยน ฤดูกาล
             </button>
           </div>
 
           <!-- Bento Dashboard Grid -->
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 sm:gap-6 flex-1">
-            <!-- Main Summary Card (Total Trees) -->
-            <div class="md:col-span-2 bg-white rounded-xl p-6 shadow-soft flex flex-col justify-between relative overflow-hidden border border-gray-50 min-h-[160px]">
-              <div class="absolute -right-6 -top-6 w-32 h-32 bg-primary/5 rounded-full blur-2xl"></div>
+          <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-12 gap-4 sm:gap-6 flex-1">
+
+            <!-- Top Left: Total Trees & Progress -->
+            <div
+              class="lg:col-span-5 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between relative overflow-hidden min-h-[180px]">
+              <div class="absolute -right-10 -top-10 w-48 h-48 bg-primary/5 rounded-full blur-3xl pointer-events-none">
+              </div>
               <div>
-                <div class="flex items-center gap-2 mb-4">
-                  <span class="material-symbols-rounded text-primary" style="font-variation-settings: 'FILL' 1;">park</span>
+                <div class="flex items-center gap-2 mb-2">
+                  <span class="material-symbols-rounded text-primary"
+                    style="font-variation-settings: 'FILL' 1;">park</span>
                   <span class="font-bold text-gray-600">สถิติต้นไม้ทั้งหมด</span>
                 </div>
-                <div class="flex items-baseline gap-2">
-                  <span class="text-5xl font-black text-gray-800 tracking-tight" id="valTotalTrees">0</span>
+                <div class="flex items-baseline gap-2 mb-6">
+                  <span class="text-6xl font-black text-gray-900 tracking-tight" id="valTotalTrees">0</span>
                   <span class="text-xl font-bold text-gray-400">ต้น</span>
                 </div>
               </div>
+              <div class="bg-gray-50 rounded-xl p-3 flex items-center gap-3 w-max">
+                <span class="text-sm font-bold text-green-600 bg-green-100 px-2 py-1 rounded">สุขภาพดี</span>
+                <span class="font-bold text-gray-700"><span id="valHealthPercent">0</span>%</span>
+              </div>
             </div>
 
-            <!-- Pending Actions Card -->
-            <div class="bg-white rounded-xl p-6 shadow-soft border-l-4 border-secondary flex flex-col min-h-[160px]">
+            <!-- Middle: Pending Actions -->
+            <div
+              class="lg:col-span-3 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col h-full cursor-pointer hover:shadow-md transition-shadow"
+              onclick="switchTab('pending', document.getElementById('tabBtn-pending'))">
               <div class="flex items-center gap-2 mb-4">
-                <span class="material-symbols-rounded text-secondary" style="font-variation-settings: 'FILL' 1;">pending_actions</span>
+                <span class="material-symbols-rounded text-secondary"
+                  style="font-variation-settings: 'FILL' 1;">pending_actions</span>
                 <span class="font-bold text-gray-600">รายการรออนุมัติ</span>
               </div>
               <div class="flex items-baseline gap-2 mt-auto">
@@ -188,9 +241,44 @@
                 <span class="text-xl font-bold text-gray-400">รายการ</span>
               </div>
             </div>
-            
-            <!-- Variety Chart -->
-            <div class="md:col-span-1 bg-white rounded-xl p-6 shadow-soft border border-gray-50 flex flex-col min-h-[300px]">
+
+            <!-- Top Right: Yield Summary -->
+            <div
+              class="lg:col-span-4 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col justify-between min-h-[180px]">
+              <div class="flex items-center gap-2 mb-4 border-b border-gray-100 pb-3">
+                <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <span class="material-symbols-rounded text-sm">inventory_2</span>
+                </div>
+                <span class="font-bold text-gray-800 text-lg">สรุปผลผลิต</span>
+              </div>
+              <div class="flex flex-col gap-3">
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2 text-gray-600">
+                    <span class="w-2 h-2 rounded-full bg-blue-400"></span>
+                    <span class="text-sm font-medium">ผลผลิตคาดการณ์</span>
+                  </div>
+                  <span class="font-bold text-gray-900 text-lg" id="valTotalExpected">0</span>
+                </div>
+                <div class="flex items-center justify-between">
+                  <div class="flex items-center gap-2 text-gray-600">
+                    <span class="w-2 h-2 rounded-full bg-red-400"></span>
+                    <span class="text-sm font-medium">เสียหาย</span>
+                  </div>
+                  <span class="font-bold text-gray-900 text-lg" id="valTotalDamaged">0</span>
+                </div>
+                <div class="flex items-center justify-between border-t border-gray-100 pt-2">
+                  <div class="flex items-center gap-2 text-gray-600">
+                    <span class="w-2 h-2 rounded-full bg-green-500 shadow-[0_0_8px_rgba(34,197,94,0.4)]"></span>
+                    <span class="text-sm font-bold text-green-600">คงเหลือ</span>
+                  </div>
+                  <span class="font-black text-green-600 text-2xl" id="valTotalRemaining">0</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Bottom Left: Variety Chart -->
+            <div
+              class="lg:col-span-5 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col min-h-[300px]">
               <h3 class="font-bold text-gray-700 mb-4 flex items-center gap-2">
                 <span class="material-symbols-rounded text-primary">pie_chart</span>
                 สัดส่วนสายพันธุ์
@@ -200,19 +288,47 @@
               </div>
             </div>
 
-            <!-- YoY Chart -->
-            <div class="md:col-span-2 bg-white rounded-xl p-6 shadow-soft border border-gray-50 flex flex-col min-h-[300px]">
+            <!-- Bottom Right: Sales & Revenue Donut Chart -->
+            <div
+              class="lg:col-span-7 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col min-h-[300px]">
               <div class="flex justify-between items-center mb-4">
                 <h3 class="font-bold text-gray-700 flex items-center gap-2">
-                  <span class="material-symbols-rounded text-primary">bar_chart</span>
-                  เปรียบเทียบผลผลิต (YoY)
+                  <span class="material-symbols-rounded text-amber-500">donut_large</span>
+                  สัดส่วนการขายแบ่งตามเกรด
                 </h3>
-                <span class="text-xs text-gray-400">หน่วย: ลูก</span>
               </div>
-              <div class="flex-1 relative w-full h-full">
-                <canvas id="yoyChart"></canvas>
+              <div class="flex-1 flex flex-col sm:flex-row items-center gap-6">
+                <!-- Revenue Summary Text -->
+                <div
+                  class="flex flex-col justify-center sm:w-1/2 w-full text-center sm:text-left bg-gray-50/50 p-6 rounded-2xl border border-gray-100 h-full">
+                  <p class="text-sm font-bold text-gray-500 mb-1 uppercase tracking-widest">ยอดเงินรายได้รวม</p>
+                  <p class="text-4xl font-black text-slate-900 mb-2">฿<span id="valTotalRevenue">0</span></p>
+                  <p class="text-xs text-green-600 font-bold bg-green-100 px-3 py-1 rounded-full w-max mx-auto sm:mx-0">
+                    อัปเดตล่าสุด: วันนี้
+                  </p>
+                </div>
+                <!-- Chart Area -->
+                <div class="flex-1 relative w-full h-48 sm:h-full flex items-center justify-center">
+                  <canvas id="salesDonutChart"></canvas>
+                </div>
               </div>
             </div>
+
+            <!-- Recent Activities -->
+            <div class="lg:col-span-12 bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col mt-2">
+              <div class="flex justify-between items-center mb-4">
+                <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                  <span class="material-symbols-rounded text-blue-500">history</span>
+                  กิจกรรมล่าสุด
+                </h3>
+              </div>
+              <div id="recentActivitiesList" class="flex flex-col gap-3">
+                <div class="text-center py-4">
+                  <p class="text-xs text-gray-500">กำลังโหลด...</p>
+                </div>
+              </div>
+            </div>
+
           </div>
         </section>
 
@@ -222,15 +338,42 @@
             <h2 class="text-2xl font-headline font-bold text-gray-800">แผนที่สวนทุเรียน</h2>
           </div>
           <div class="bg-white p-2 rounded-3xl shadow-soft flex-1 relative border border-gray-50 overflow-hidden">
-            <div id="map" class="w-full h-full min-h-[400px] rounded-2xl z-0"></div>
+            <div id="map" class="w-full h-full min-h-[70vh] rounded-2xl z-0"></div>
           </div>
         </section>
 
         <!-- Tab: รออนุมัติ -->
         <section id="tab-pending" class="tab-content hidden flex-1 flex flex-col">
-          <h2 class="text-2xl font-headline font-bold text-gray-800 mb-6">รายการรออนุมัติ</h2>
+          <div class="flex items-center justify-between mb-4">
+            <h2 class="text-2xl font-headline font-bold text-gray-800">รายการรออนุมัติ</h2>
+          </div>
+
+          <!-- Pending Tabs -->
+          <div class="flex items-center gap-2 mb-6 bg-gray-100 p-1 rounded-xl w-max">
+            <button onclick="setPendingTab('pending')" id="pendingTabBtn-pending"
+              class="px-6 py-2 rounded-lg font-bold text-sm bg-white text-primary shadow-sm transition-all">รออนุมัติ</button>
+            <button onclick="setPendingTab('approved')" id="pendingTabBtn-approved"
+              class="px-6 py-2 rounded-lg font-bold text-sm text-gray-500 hover:text-gray-700 transition-all">อนุมัติแล้ว</button>
+            <button onclick="setPendingTab('rejected')" id="pendingTabBtn-rejected"
+              class="px-6 py-2 rounded-lg font-bold text-sm text-gray-500 hover:text-gray-700 transition-all">ปฏิเสธแล้ว</button>
+          </div>
+
+          <!-- Pending Summary Cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-6">
+            <div
+              class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+              <p class="text-sm font-bold text-gray-500 mb-2">รออนุมัติทั้งหมด</p>
+              <p class="text-4xl font-black text-primary" id="valPendingSummaryCount">0</p>
+            </div>
+            <div
+              class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col items-center justify-center">
+              <p class="text-sm font-bold text-gray-500 mb-2">อนุมัติแล้วปีนี้</p>
+              <p class="text-4xl font-black text-amber-500" id="valApprovedSummaryCount">0</p>
+            </div>
+          </div>
+
           <div id="pendingList" class="flex flex-col gap-4">
-             <!-- Items go here -->
+            <!-- Items go here -->
           </div>
         </section>
 
@@ -260,8 +403,10 @@
           <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
             <h2 class="text-2xl font-headline font-bold text-gray-800">ข้อมูลต้นไม้ทั้งหมด</h2>
             <div class="relative w-full sm:w-64">
-              <span class="material-symbols-rounded absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span>
-              <input type="text" id="treeSearch" placeholder="ค้นหารหัส หรือสายพันธุ์..." onkeyup="filterTrees()" class="w-full pl-10 pr-4 py-2 bg-white border-none rounded-xl shadow-sm focus:ring-2 focus:ring-primary text-sm">
+              <span
+                class="material-symbols-rounded absolute left-3 top-1/2 -translate-y-1/2 text-gray-400">search</span>
+              <input type="text" id="treeSearch" placeholder="ค้นหารหัส หรือสายพันธุ์..." onkeyup="filterTrees()"
+                class="w-full pl-10 pr-4 py-2 bg-white border-none rounded-xl shadow-sm focus:ring-2 focus:ring-primary text-sm">
             </div>
           </div>
           <div class="bg-white rounded-3xl shadow-soft border border-gray-50 overflow-hidden flex-1 flex flex-col">
@@ -286,37 +431,101 @@
         </section>
 
         <!-- Tab: รายได้ -->
-        <section id="tab-income" class="tab-content hidden flex-1 flex flex-col">
-          <div class="flex flex-col sm:flex-row justify-between items-start sm:items-center mb-6 gap-4">
-            <h2 class="text-2xl font-headline font-bold text-gray-800">รายได้จากการขาย</h2>
-          </div>
-          <!-- Summary card -->
-          <div class="bg-white rounded-xl p-6 shadow-soft border-l-4 border-primary flex items-center gap-4 mb-6">
-            <span class="material-symbols-rounded text-primary text-3xl" style="font-variation-settings: 'FILL' 1;">payments</span>
+        <section id="tab-income" class="tab-content hidden flex-1 flex flex-col gap-6">
+          <div class="flex items-center justify-between mb-2">
             <div>
-              <p class="text-sm text-gray-500">รายได้รวม (ฤดูกาลนี้)</p>
-              <div class="flex items-baseline gap-2">
-                <span class="text-4xl font-black text-primary" id="valTotalIncome">0</span>
-                <span class="text-lg font-bold text-gray-400">บาท</span>
+              <h2 class="text-2xl font-headline font-bold text-gray-800">สรุปรายได้</h2>
+            </div>
+            <!-- Toggle (Mocked as in Stitch design) -->
+            <div class="bg-gray-100 p-1 rounded-xl flex items-center text-xs font-bold text-gray-400">
+              <button class="px-3 py-1 rounded-lg">ยอดขาย</button>
+              <button class="bg-white text-primary shadow-sm px-3 py-1 rounded-lg">รายได้</button>
+            </div>
+          </div>
+
+          <!-- Top Cards -->
+          <div class="grid grid-cols-1 sm:grid-cols-2 gap-4 sm:gap-6">
+            <!-- Revenue Card -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative overflow-hidden">
+              <div class="absolute -right-6 -top-6 w-24 h-24 bg-green-500/10 rounded-full blur-xl pointer-events-none">
+              </div>
+              <div class="flex items-center gap-2 mb-4">
+                <div class="w-8 h-8 rounded-full bg-green-50 text-green-600 flex items-center justify-center">
+                  <span class="material-symbols-rounded text-sm">payments</span>
+                </div>
+                <span class="font-bold text-gray-600">รายได้รวม</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex items-baseline gap-1">
+                  <span class="text-3xl font-black text-gray-900 tracking-tight">฿<span
+                      id="valTotalIncome">0</span></span>
+                </div>
+                <div class="flex items-center gap-1 text-xs font-bold text-green-600 mt-1">
+                  <span class="material-symbols-rounded text-[14px]">trending_up</span>
+                  <span>+0.0% YoY</span> <span class="text-gray-300 font-normal ml-1">เทียบปีที่แล้ว</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Volume Card -->
+            <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 relative overflow-hidden">
+              <div class="absolute -right-6 -top-6 w-24 h-24 bg-amber-500/10 rounded-full blur-xl pointer-events-none">
+              </div>
+              <div class="flex items-center gap-2 mb-4">
+                <div class="w-8 h-8 rounded-full bg-amber-50 text-amber-600 flex items-center justify-center">
+                  <span class="material-symbols-rounded text-sm">scale</span>
+                </div>
+                <span class="font-bold text-gray-600">ปริมาณขายรวม</span>
+              </div>
+              <div class="flex flex-col gap-1">
+                <div class="flex items-baseline gap-1">
+                  <span class="text-3xl font-black text-gray-900 tracking-tight" id="valTotalVolume">0</span>
+                  <span class="text-sm font-bold text-gray-400">กก.</span>
+                </div>
+                <div class="flex items-center gap-1 text-xs font-bold text-red-500 mt-1">
+                  <span class="material-symbols-rounded text-[14px]">trending_down</span>
+                  <span>-0.0% YoY</span> <span class="text-gray-300 font-normal ml-1">เทียบปีที่แล้ว</span>
+                </div>
               </div>
             </div>
           </div>
-          <!-- Income table -->
-          <div class="bg-white rounded-3xl shadow-soft border border-gray-50 overflow-hidden flex-1 flex flex-col">
-            <div class="overflow-x-auto flex-1">
-              <table class="w-full text-left border-collapse min-w-[600px]">
+
+          <!-- YoY Chart -->
+          <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col min-h-[300px]">
+            <div class="flex justify-between items-center mb-6">
+              <h3 class="font-bold text-gray-700 flex items-center gap-2">
+                <span class="material-symbols-rounded text-primary">bar_chart</span>
+                เปรียบเทียบผลผลิตรายปี (YoY)
+              </h3>
+              <div class="flex items-center gap-3">
+                <div class="flex items-center gap-1 text-xs text-gray-500 font-medium">
+                  <span class="w-3 h-3 rounded-full bg-[#7CB342]"></span> ปัจจุบัน
+                </div>
+              </div>
+            </div>
+            <div class="flex-1 relative w-full h-full">
+              <canvas id="yoyChart"></canvas>
+            </div>
+          </div>
+
+          <!-- Sales by Grade Table -->
+          <div class="bg-white rounded-2xl p-6 shadow-sm border border-gray-100 flex flex-col">
+            <h3 class="font-bold text-gray-700 flex items-center gap-2 mb-4">
+              <span class="material-symbols-rounded text-amber-500">category</span>
+              ยอดขายแบ่งตามเกรด
+            </h3>
+            <div class="overflow-x-auto">
+              <table class="w-full text-left border-collapse min-w-[500px]">
                 <thead>
-                  <tr class="bg-gray-50/50 text-gray-500 text-sm border-b border-gray-100 whitespace-nowrap">
-                    <th class="p-4 font-medium">วันที่</th>
-                    <th class="p-4 font-medium">รหัสต้น</th>
-                    <th class="p-4 font-medium">เกรด</th>
-                    <th class="p-4 font-medium text-right">น้ำหนัก (กก.)</th>
-                    <th class="p-4 font-medium text-right">ราคา (บ/กก.)</th>
-                    <th class="p-4 font-medium text-right">รวม (บาท)</th>
+                  <tr class="border-b-2 border-gray-100 text-xs font-bold text-gray-400 uppercase tracking-wider">
+                    <th class="pb-3 pt-2">เกรด</th>
+                    <th class="pb-3 pt-2 text-right">น้ำหนัก (กก.)</th>
+                    <th class="pb-3 pt-2 text-right">ราคาเฉลี่ย/กก.</th>
+                    <th class="pb-3 pt-2 text-right">รวม (บาท)</th>
                   </tr>
                 </thead>
-                <tbody id="incomeTableBody" class="divide-y divide-gray-100">
-                  <!-- Income rows go here -->
+                <tbody id="incomeTableBody" class="divide-y divide-gray-50 text-sm">
+                  <!-- Grade rows go here -->
                 </tbody>
               </table>
             </div>
@@ -326,66 +535,186 @@
       </main>
     </div>
 
-    <!-- Tree Detail Modal -->
-    <div id="treeDetailModal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
-      <div class="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200" id="treeDetailModalContent">
-        <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
-          <div>
-            <h3 id="detailTreeTitle" class="font-headline text-xl font-bold text-gray-800">รหัสต้นไม้</h3>
-            <p id="detailTreeVariety" class="text-primary font-medium text-sm">สายพันธุ์</p>
+    <!-- Tree Detail Modal (Rich Profile) -->
+    <div id="treeDetailModal"
+      class="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
+      <div
+        class="bg-[#F5F5F5] rounded-3xl w-full max-w-2xl shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200"
+        id="treeDetailModalContent">
+
+        <!-- Header -->
+        <header
+          class="flex items-center justify-between px-4 h-16 bg-white border-b border-gray-100 shadow-sm shrink-0">
+          <button onclick="closeTreeDetailModal()"
+            class="w-10 h-10 flex items-center justify-center rounded-full hover:bg-gray-50 transition-colors active:scale-95 duration-150">
+            <span class="material-symbols-rounded text-[#7CB342]">arrow_back</span>
+          </button>
+          <h1 class="font-headline text-lg font-bold tracking-tight text-[#7CB342]">บ้านสวนโพรงกระต่าย</h1>
+          <div class="w-10 h-10 rounded-full overflow-hidden border-2 border-[#7CB342]/20">
+            <img class="w-full h-full object-cover"
+              src="https://lh3.googleusercontent.com/aida-public/AB6AXuCAGs0di-I9v7402CFzadKJWasbVPD_x6XEQMXipZFLHs_R75r8fCAsPXaPkWqhJ4LK8jkLSbNmmliEonc2uiyHsjiGykjcbBBGBw5mxYx98jJoXm9ypAeeFbF1XwQbTYZhyVTTSMj8NOPVaVU9TKd69gOBFH8-cZbWkFDH5iuOlX5XRVIvv6Kh_FCJ001ERM2AcB2dQwi5VM-PGX6bxByUg3Fw-wasSn-Or5J1Pwjx7kvSSbIfY3gUQjC6SCNZ3Wx1ZyVIjfxJQAkN"
+              alt="Farm Logo" />
           </div>
-          <button onclick="closeTreeDetailModal()" class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 transition-colors">
-            <span class="material-symbols-rounded">close</span>
+        </header>
+
+        <!-- Main Content -->
+        <div class="p-4 overflow-y-auto flex-1 space-y-5 hide-scrollbar">
+
+          <!-- Hero: Tree Identity Section -->
+          <section class="relative overflow-hidden bg-white rounded-xl p-5 shadow-sm border border-gray-100">
+            <div class="absolute top-0 right-0 p-4 opacity-10 pointer-events-none">
+              <span class="material-symbols-rounded text-8xl" style="font-variation-settings: 'FILL' 1;">park</span>
+            </div>
+            <div class="relative z-10 flex flex-col gap-1">
+              <span class="text-xs font-bold text-primary tracking-widest uppercase">Tree Identity</span>
+              <h2 id="detailTreeTitle" class="text-3xl font-black font-headline text-slate-900">T-001</h2>
+              <div class="flex flex-wrap items-center gap-3 mt-2">
+                <div class="bg-primary/10 px-3 py-1 rounded-full flex items-center gap-1">
+                  <span class="material-symbols-rounded text-sm text-primary"
+                    style="font-variation-settings: 'FILL' 1;">eco</span>
+                  <span id="detailTreeVariety" class="text-sm font-bold text-primary">-</span>
+                </div>
+                <div class="bg-amber-50 px-3 py-1 rounded-full flex items-center gap-1 border border-amber-100">
+                  <span class="material-symbols-rounded text-sm text-amber-600">calendar_today</span>
+                  <span class="text-sm font-medium text-amber-700"><span id="detailTreeAge">-</span> ปี</span>
+                </div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Main Image Gallery -->
+          <div id="detailPhotoGallery"
+            class="flex gap-3 overflow-x-auto snap-x h-48 w-full rounded-xl hide-scrollbar relative">
+            <img id="detailPhotoPreview" src=""
+              class="w-full h-full object-cover shrink-0 snap-center rounded-xl shadow-sm border border-gray-100"
+              onerror="this.src='https://placehold.co/600x300?text=No+Image'">
+            <div id="detailNoPhoto"
+              class="hidden shrink-0 w-full h-full bg-gray-200 flex items-center justify-center rounded-xl text-gray-500 shadow-sm border border-gray-100">
+              ไม่มีรูปภาพ</div>
+          </div>
+
+          <!-- Stats Bento Grid (4 Cards) -->
+          <section class="grid grid-cols-2 gap-3">
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+              <div class="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
+                <span class="material-symbols-rounded text-green-600"
+                  style="font-variation-settings: 'FILL' 1;">grass</span>
+              </div>
+              <div>
+                <p class="text-xs font-medium text-slate-400">จำนวนลูก/ดอก</p>
+                <p class="text-xl font-bold text-slate-900"><span id="detailTreeFruitCount">-</span> <span
+                    class="text-sm font-normal text-slate-500">ลูก</span></p>
+              </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+              <div class="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                <span class="material-symbols-rounded text-primary">local_florist</span>
+              </div>
+              <div>
+                <p class="text-xs font-medium text-slate-400">เดือนที่ออกดอก</p>
+                <p id="detailTreeFlowerMonth" class="text-xl font-bold text-slate-900">-</p>
+              </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+              <div class="w-10 h-10 bg-amber-50 rounded-lg flex items-center justify-center">
+                <span class="material-symbols-rounded text-amber-500">shopping_basket</span>
+              </div>
+              <div>
+                <p class="text-xs font-medium text-slate-400">ผลผลิตเก็บเกี่ยว</p>
+                <p class="text-xl font-bold text-slate-900"><span id="detailTreeTotalYield">-</span> <span
+                    class="text-sm font-normal text-slate-500">ลูก</span></p>
+              </div>
+            </div>
+            <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
+              <div id="detailTreeHealthIconBox"
+                class="w-10 h-10 bg-green-50 rounded-lg flex items-center justify-center">
+                <span id="detailTreeHealthIcon" class="material-symbols-rounded text-green-600"
+                  style="font-variation-settings: 'FILL' 1;">favorite</span>
+              </div>
+              <div>
+                <p class="text-xs font-medium text-slate-400">สถานะสุขภาพ</p>
+                <p id="detailTreeHealthStatus" class="text-xl font-bold text-green-600">สมบูรณ์ดี</p>
+              </div>
+            </div>
+          </section>
+
+          <!-- Tree Location Map -->
+          <section class="bg-white rounded-xl overflow-hidden shadow-sm border border-gray-100">
+            <div class="p-3 border-b border-gray-50 flex items-center justify-between">
+              <div class="flex items-center gap-2">
+                <span class="material-symbols-rounded text-[#A1887F]">location_on</span>
+                <h3 class="font-bold text-slate-800 text-sm">ตำแหน่งต้นไม้</h3>
+              </div>
+              <span id="detailTreeLatLng" class="text-xs font-medium text-slate-400 font-mono">-</span>
+            </div>
+            <div id="treeDetailMapContainer" class="h-32 relative">
+              <div id="treeDetailMap" class="absolute inset-0 z-0"></div>
+            </div>
+          </section>
+
+          <!-- Productivity Progress Bar -->
+          <section class="bg-white p-5 rounded-xl shadow-sm border border-gray-100">
+            <div class="flex items-center justify-between mb-4">
+              <h3 class="font-bold text-slate-800">ความคืบหน้าฤดูกาลนี้</h3>
+              <span
+                class="text-[10px] font-bold text-primary px-2 py-1 bg-primary/10 rounded uppercase tracking-wider">Harvest
+                Progress</span>
+            </div>
+            <div class="space-y-2">
+              <div class="flex justify-between text-sm">
+                <span class="text-slate-500 font-medium">เก็บเกี่ยวแล้ว <span id="detailProgressCount"
+                    class="font-bold text-slate-900">0</span> ลูก</span>
+                <span id="detailProgressPercent" class="font-bold text-primary">0%</span>
+              </div>
+              <div class="w-full h-3 bg-slate-100 rounded-full overflow-hidden">
+                <div id="detailProgressBar" class="h-full bg-primary transition-all duration-500 ease-out"
+                  style="width: 0%"></div>
+              </div>
+            </div>
+          </section>
+
+          <!-- Harvest History -->
+          <section class="space-y-3">
+            <div class="flex items-center justify-between px-1">
+              <h3 class="font-bold text-slate-800">ประวัติการเก็บเกี่ยว</h3>
+            </div>
+            <div id="detailHistoryContainer" class="space-y-3">
+              <div class="text-center py-4 bg-white rounded-xl shadow-sm border border-gray-100">
+                <span class="material-symbols-rounded animate-spin text-gray-400">refresh</span>
+                <p class="text-xs text-gray-500 mt-2">กำลังโหลดประวัติ...</p>
+              </div>
+            </div>
+          </section>
+
+        </div>
+
+        <!-- Bottom Actions -->
+        <div class="p-4 border-t border-gray-100 bg-white shrink-0 grid grid-cols-2 gap-3">
+          <button id="btnDetailQR"
+            class="flex items-center justify-center gap-2 bg-white text-slate-600 border border-slate-200 py-3 px-4 rounded-xl font-bold shadow-sm hover:bg-slate-50 transition-all active:scale-95">
+            <span class="material-symbols-rounded text-lg">qr_code_scanner</span>
+            <span>QR Code</span>
+          </button>
+          <button id="btnDetailEdit"
+            class="flex items-center justify-center gap-2 bg-primary text-white py-3 px-4 rounded-xl font-bold shadow-md hover:bg-primary/90 transition-all active:scale-95">
+            <span class="material-symbols-rounded text-lg">edit</span>
+            <span>แก้ไขข้อมูล</span>
           </button>
         </div>
-        <div class="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
-          <!-- Photo -->
-          <div class="flex justify-center mb-2">
-            <img id="detailPhotoPreview" src="" class="w-full max-h-48 object-cover rounded-2xl shadow-sm hidden">
-            <div id="detailNoPhoto" class="w-24 h-24 bg-gray-100 rounded-2xl flex flex-col items-center justify-center text-gray-400">
-              <span class="material-symbols-rounded text-3xl">image_not_supported</span>
-              <span class="text-xs mt-1">ไม่มีรูป</span>
-            </div>
-          </div>
-          <!-- Stats grid -->
-          <div class="grid grid-cols-2 gap-3">
-            <div class="bg-gray-50 rounded-xl p-3">
-              <p class="text-xs text-gray-500">อายุ</p>
-              <p class="font-bold text-gray-800"><span id="detailTreeAge">-</span> ปี</p>
-            </div>
-            <div class="bg-gray-50 rounded-xl p-3">
-              <p class="text-xs text-gray-500">จำนวนลูก/ดอก</p>
-              <p class="font-bold text-gray-800"><span id="detailTreeFruitCount">-</span> ลูก</p>
-            </div>
-            <div class="bg-gray-50 rounded-xl p-3">
-              <p class="text-xs text-gray-500">เดือนออกดอก</p>
-              <p class="font-bold text-gray-800" id="detailTreeFlowerMonth">-</p>
-            </div>
-            <div class="bg-gray-50 rounded-xl p-3">
-              <p class="text-xs text-gray-500">พิกัด</p>
-              <p class="font-bold text-gray-800 text-xs font-mono" id="detailTreeLatLng">-</p>
-            </div>
-          </div>
-        </div>
-        <div class="p-6 border-t border-gray-100 flex gap-3 bg-white shrink-0">
-          <button id="btnDetailEdit" class="flex-1 py-3 px-4 rounded-xl font-medium text-white bg-primary hover:bg-[#689f38] shadow-sm transition-colors flex items-center justify-center gap-2">
-            <span class="material-symbols-rounded text-xl">edit</span>
-            แก้ไข
-          </button>
-          <button id="btnDetailQR" class="flex-1 py-3 px-4 rounded-xl font-medium text-white bg-secondary hover:bg-[#f57f17] shadow-sm transition-colors flex items-center justify-center gap-2">
-            <span class="material-symbols-rounded text-xl">qr_code_2</span>
-            QR Code
-          </button>
-        </div>
+
       </div>
     </div>
 
     <!-- QR Code Modal -->
-    <div id="qrModal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
-      <div class="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200" id="qrModalContent">
+    <div id="qrModal"
+      class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
+      <div
+        class="bg-white rounded-3xl w-full max-w-sm shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200"
+        id="qrModalContent">
         <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 class="font-headline text-xl font-bold text-gray-800">QR Code ต้นไม้</h3>
-          <button onclick="closeQRModal()" class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 transition-colors">
+          <button onclick="closeQRModal()"
+            class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 transition-colors">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
@@ -395,41 +724,49 @@
           <p class="text-sm text-gray-500 text-center">สแกน QR Code นี้เพื่อเปิดข้อมูลต้นไม้ใน LINE</p>
         </div>
         <div class="p-6 border-t border-gray-100 bg-white shrink-0">
-          <button onclick="closeQRModal()" class="w-full py-3 px-4 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">ปิด</button>
+          <button onclick="closeQRModal()"
+            class="w-full py-3 px-4 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">ปิด</button>
         </div>
       </div>
     </div>
 
     <!-- Edit Tree Modal -->
-    <div id="treeModal" class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
-      <div class="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200" id="treeModalContent">
-        
+    <div id="treeModal"
+      class="fixed inset-0 bg-gray-900/40 backdrop-blur-sm z-[1000] flex items-center justify-center p-4 hidden opacity-0 transition-opacity duration-200">
+      <div
+        class="bg-white rounded-3xl w-full max-w-md shadow-2xl overflow-hidden flex flex-col max-h-[90vh] scale-95 transition-transform duration-200"
+        id="treeModalContent">
+
         <div class="p-6 border-b border-gray-100 flex justify-between items-center bg-gray-50/50">
           <h3 id="modalTreeTitle" class="font-headline text-xl font-bold text-gray-800">แก้ไขต้นไม้</h3>
-          <button onclick="closeTreeModal()" class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 transition-colors">
+          <button onclick="closeTreeModal()"
+            class="w-8 h-8 flex items-center justify-center rounded-full text-gray-400 hover:bg-gray-200 transition-colors">
             <span class="material-symbols-rounded">close</span>
           </button>
         </div>
-        
+
         <div class="p-6 overflow-y-auto flex-1 flex flex-col gap-4">
           <input type="hidden" id="editTreeId">
-          
+
           <div class="flex flex-col gap-2 mb-2">
             <label class="block text-sm font-bold text-gray-700">รูปภาพแกลเลอรี (Hero Image อยู่หน้าสุด)</label>
             <div id="editPhotoGallery" class="flex gap-3 overflow-x-auto py-2 snap-x">
               <!-- Images will be injected here via JS -->
             </div>
-            
+
             <div class="mt-2">
               <label class="block text-sm text-gray-500 mb-1">เพิ่มรูปภาพใหม่ (อัปโหลดทับ/ต่อท้าย)</label>
-              <input type="file" id="editPhotoFile" accept="image/*" class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary text-sm" onchange="handlePhotoUpload(this)">
+              <input type="file" id="editPhotoFile" accept="image/*"
+                class="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-primary text-sm"
+                onchange="handlePhotoUpload(this)">
             </div>
             <input type="hidden" id="editPhotoUrl">
           </div>
 
           <div>
             <label class="block text-sm font-bold text-gray-700 mb-1">สายพันธุ์</label>
-            <select id="editVariety" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
+            <select id="editVariety"
+              class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
               <option value="หมอนทอง">หมอนทอง</option>
               <option value="ชะนี">ชะนี</option>
               <option value="ก้านยาว">ก้านยาว</option>
@@ -443,17 +780,20 @@
           <div class="grid grid-cols-2 gap-4">
             <div>
               <label class="block text-sm font-bold text-gray-700 mb-1">อายุ (ปี)</label>
-              <input type="number" id="editAge" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
+              <input type="number" id="editAge"
+                class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
             </div>
             <div>
               <label class="block text-sm font-bold text-gray-700 mb-1">จำนวนลูก/ดอก</label>
-              <input type="number" id="editFruitCount" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
+              <input type="number" id="editFruitCount"
+                class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
             </div>
           </div>
 
           <div>
             <label class="block text-sm font-bold text-gray-700 mb-1">เดือนที่ออกดอก</label>
-            <select id="editFlowerMonth" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
+            <select id="editFlowerMonth"
+              class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm">
               <option value="">-- เลือกเดือน --</option>
               <option value="มกราคม">มกราคม</option>
               <option value="กุมภาพันธ์">กุมภาพันธ์</option>
@@ -473,18 +813,22 @@
           <div class="grid grid-cols-2 gap-4 mb-2">
             <div>
               <label class="block text-sm font-bold text-gray-700 mb-1">พิกัด Latitude</label>
-              <input type="text" id="editLat" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm font-mono text-xs">
+              <input type="text" id="editLat"
+                class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm font-mono text-xs">
             </div>
             <div>
               <label class="block text-sm font-bold text-gray-700 mb-1">พิกัด Longitude</label>
-              <input type="text" id="editLng" class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm font-mono text-xs">
+              <input type="text" id="editLng"
+                class="w-full px-4 py-2 bg-gray-50 border-none rounded-xl focus:ring-2 focus:ring-primary text-sm font-mono text-xs">
             </div>
           </div>
         </div>
-        
+
         <div class="p-6 border-t border-gray-100 flex gap-4 bg-white shrink-0">
-          <button onclick="closeTreeModal()" class="flex-1 py-3 px-4 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">ยกเลิก</button>
-          <button onclick="saveTree()" class="flex-1 py-3 px-4 rounded-xl font-medium text-white bg-primary hover:bg-[#689f38] shadow-sm transition-colors flex items-center justify-center gap-2">
+          <button onclick="closeTreeModal()"
+            class="flex-1 py-3 px-4 rounded-xl font-medium text-gray-600 bg-gray-100 hover:bg-gray-200 transition-colors">ยกเลิก</button>
+          <button onclick="saveTree()"
+            class="flex-1 py-3 px-4 rounded-xl font-medium text-white bg-primary hover:bg-[#689f38] shadow-sm transition-colors flex items-center justify-center gap-2">
             <span class="material-symbols-rounded text-xl">save</span>
             บันทึก
           </button>
@@ -499,7 +843,7 @@
   <script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.js"></script>
   <script>
     const LIFF_ID = "<?= liffId ?>";
-    
+
     // Handle Greeting
     const hour = new Date().getHours();
     const greeting = document.getElementById('greetingText');
@@ -508,7 +852,7 @@
       else if (hour >= 12 && hour < 17) greeting.innerText = 'สวัสดีตอนบ่าย! 🐰';
       else greeting.innerText = 'สวัสดีตอนเย็น! 🐰';
     }
-    
+
     // Tree Modal helpers
     function closeTreeModal() {
       const modal = document.getElementById('treeModal');
@@ -562,4 +906,5 @@
   </script>
   <?!= HtmlService.createHtmlOutputFromFile('Dashboard.js').getContent(); ?>
 </body>
+
 </html>

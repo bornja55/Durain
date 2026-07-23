@@ -134,6 +134,25 @@ function setDefaultRichMenu(richMenuId) {
   }
 }
 
+function removeDefaultRichMenu() {
+  const token = getConfig('CHANNEL_ACCESS_TOKEN');
+  const url = `https://api.line.me/v2/bot/user/all/richmenu`;
+  const options = {
+    method: 'delete',
+    headers: {
+      'Authorization': 'Bearer ' + token
+    },
+    muteHttpExceptions: true
+  };
+  
+  const response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() === 200) {
+    Logger.log('ยกเลิกเมนูเริ่มต้นสำเร็จ! (ผู้ใช้ใหม่จะไม่เห็นเมนูจนกว่าจะถูกกำหนด Role)');
+  } else {
+    Logger.log('เกิดข้อผิดพลาด: ' + response.getContentText());
+  }
+}
+
 /**
  * ฟังก์ชันสำหรับอัปโหลดรูปภาพ Rich Menu จาก Google Drive
  * @param {string} richMenuId - ID ของ Rich Menu ที่สร้างไว้
@@ -236,7 +255,7 @@ function setupCustomerRichMenu() {
 
 function finalizeCustomerMenu() {
   const customerMenuId = "richmenu-275478d29a58253eacf727ca4e00d179";
-  const customerImageDriveId = "1dyDGvNzgaWVPidkUeXH1c9mXIiNqNMRD";
+  const customerImageDriveId = "11SdX487KqM2HZV5R61rfU-WchMBAEBIf"; // รูปภาพ Customer Menu ที่ส่งมาใหม่
 
   if (!customerMenuId || !customerImageDriveId) {
     Logger.log("กรุณาใส่ customerMenuId และ customerImageDriveId ก่อนรัน");
@@ -244,5 +263,18 @@ function finalizeCustomerMenu() {
   }
 
   uploadRichMenuImageFromDrive(customerMenuId, customerImageDriveId);
-  Logger.log("เสร็จสิ้น! บันทึก CUSTOMER_RICH_MENU_ID=" + customerMenuId + " ลง Config sheet");
+  Logger.log("เสร็จสิ้น! อัปโหลดรูปภาพ Customer Menu เรียบร้อยแล้ว");
+}
+
+// 4. ฟังก์ชันสำหรับอัปโหลดรูปและตั้งค่า Customer Menu ให้เป็นเมนูเริ่มต้น (Default) รวดเดียวจบ
+function setDefaultToCustomerMenu() {
+  const customerMenuId = "richmenu-275478d29a58253eacf727ca4e00d179"; // ID ของ Customer Menu
+  const customerImageDriveId = "11SdX487KqM2HZV5R61rfU-WchMBAEBIf";
+  
+  // 1. อัปโหลดรูปก่อน (แก้ปัญหา Error: must upload richmenu image)
+  uploadRichMenuImageFromDrive(customerMenuId, customerImageDriveId);
+  
+  // 2. ตั้งเป็น Default
+  setDefaultRichMenu(customerMenuId);
+  Logger.log("อัปโหลดรูปและตั้งค่า Customer Menu เป็นเมนูเริ่มต้น (Default) เรียบร้อยแล้ว!");
 }

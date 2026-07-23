@@ -96,7 +96,7 @@ function handleFollow(event) {
   let role = getUserRole(userId);
   if (!role) {
     role = 'Customer';
-    registerUser(userId, profile.displayName || 'Unknown', role);
+    registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
   }
   
   // ผูก Rich Menu ตาม Role (ป้องกันการเขียนทับเมนูของผู้ใช้เดิม)
@@ -118,7 +118,7 @@ function handlePostback(event) {
     try {
       const profile = getProfile(userId);
       role = 'Customer';
-      registerUser(userId, profile.displayName || 'Unknown', role);
+      registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
       syncUserRichMenu(userId, role);
     } catch(e) {}
   }
@@ -201,6 +201,8 @@ function handlePostback(event) {
     replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์จำนวนลูก(หรือดอก) ปัจจุบัน (หากไม่มีให้ใส่ 0)'));
   }
   else if (action === 'CONFIRM') {
+    if (!getState(userId)) return; // Prevent double submission
+    
     const type = params['type'];
     const profile = getProfile(userId);
     let queueType = '';
@@ -296,7 +298,7 @@ function handleTextMessage(event) {
     if (!role) {
       const profile = getProfile(userId);
       role = 'Customer';
-      registerUser(userId, profile.displayName || 'Unknown', role);
+      registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
       syncUserRichMenu(userId, role);
     }
     // Default reply

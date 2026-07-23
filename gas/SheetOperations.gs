@@ -1,18 +1,51 @@
-let cachedSpreadsheet = null;
+// ==========================================
+// Core Data Access (Repositories)
+// ==========================================
 
-function getSpreadsheet() {
-  if (!cachedSpreadsheet) {
-    const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-    if (!spreadsheetId) {
-       throw new Error("คุณยังไม่ได้ตั้งค่า SPREADSHEET_ID ใน Script Properties (Project Settings)");
+const SheetRepository = {
+  cachedSpreadsheet: null,
+  getSpreadsheet: function() {
+    if (!this.cachedSpreadsheet) {
+      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+      if (!spreadsheetId) {
+         throw new Error("คุณยังไม่ได้ตั้งค่า SPREADSHEET_ID ใน Script Properties (Project Settings)");
+      }
+      this.cachedSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
     }
-    cachedSpreadsheet = SpreadsheetApp.openById(spreadsheetId);
+    return this.cachedSpreadsheet;
+  },
+  getSheet: function(name) {
+    return this.getSpreadsheet().getSheetByName(name);
+  },
+  getData: function(sheetName) {
+    const sheet = this.getSheet(sheetName);
+    return sheet ? sheet.getDataRange().getValues() : [];
+  },
+  appendRow: function(sheetName, rowData) {
+    const sheet = this.getSheet(sheetName);
+    if(sheet) sheet.appendRow(rowData);
+  },
+  updateCell: function(sheetName, rowIdx, colIdx, value) {
+    const sheet = this.getSheet(sheetName);
+    if(sheet) sheet.getRange(rowIdx, colIdx).setValue(value);
+  },
+  getLastRow: function(sheetName) {
+    const sheet = this.getSheet(sheetName);
+    return sheet ? sheet.getLastRow() : 0;
+  },
+  getCellValue: function(sheetName, rowIdx, colIdx) {
+    const sheet = this.getSheet(sheetName);
+    return sheet ? sheet.getRange(rowIdx, colIdx).getValue() : null;
   }
-  return cachedSpreadsheet;
+};
+
+// Global wrapper for backward compatibility with LineAPI.gs and QRGenerator.gs
+function getSpreadsheet() {
+  return SheetRepository.getSpreadsheet();
 }
 
 function getTreeInfo(treeId) {
-  const sheet = getSpreadsheet().getSheetByName('ต้นไม้');
+  const sheet = SheetRepository.getSheet('ต้นไม้');
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   
@@ -33,7 +66,7 @@ function getActiveSeason() {
 }
 
 function getProductionForTree(seasonId, treeId) {
-  const sheet = getSpreadsheet().getSheetByName('ผลผลิต');
+  const sheet = SheetRepository.getSheet('ผลผลิต');
   const data = sheet.getDataRange().getValues();
   
   for (let i = 1; i < data.length; i++) {
@@ -53,7 +86,7 @@ function getRemainingFruits(seasonId, treeId) {
 }
 
 function addToPendingQueue(type, treeId, data, userId, displayName, photoUrl) {
-  const sheet = getSpreadsheet().getSheetByName('คิวรออนุมัติ');
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
   const date = new Date();
   
   const lastRow = sheet.getLastRow();
@@ -78,7 +111,7 @@ function addToPendingQueue(type, treeId, data, userId, displayName, photoUrl) {
 }
 
 function getPendingItems() {
-  const sheet = getSpreadsheet().getSheetByName('คิวรออนุมัติ');
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
   const data = sheet.getDataRange().getValues();
   const headers = data[0];
   const items = [];
@@ -105,7 +138,7 @@ function getNewPendingCount(sinceDate) {
 }
 
 function generateNextTreeId() {
-  const ss = getSpreadsheet();
+  const ss = SheetRepository.getSpreadsheet();
   const treeSheet = ss.getSheetByName('ต้นไม้');
   const treeData = treeSheet.getDataRange().getValues();
   
@@ -137,7 +170,7 @@ function generateNextTreeId() {
 }
 
 function approveItem(itemId, approverName) {
-  const sheet = getSpreadsheet().getSheetByName('คิวรออนุมัติ');
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
   const data = sheet.getDataRange().getValues();
   
   for (let i = 1; i < data.length; i++) {
@@ -154,7 +187,7 @@ function approveItem(itemId, approverName) {
       const approveDate = new Date();
       
       if (type === 'ตัดจำหน่าย') {
-        const harvestSheet = getSpreadsheet().getSheetByName('การเก็บเกี่ยว');
+        const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
         const nextHId = harvestSheet.getLastRow() > 1 ? Number(harvestSheet.getRange(harvestSheet.getLastRow(), 1).getValue()) + 1 : 1;
         harvestSheet.appendRow([
           nextHId, seasonId, treeId, itemData.quantity, itemData.reason, itemData.grade, 
@@ -162,7 +195,7 @@ function approveItem(itemId, approverName) {
         ]);
         
       } else if (type === 'บันทึกผลผลิต') {
-        const prodSheet = getSpreadsheet().getSheetByName('ผลผลิต');
+        const prodSheet = SheetRepository.getSheet('ผลผลิต');
         const prodData = prodSheet.getDataRange().getValues();
         let found = false;
         for(let r=1; r<prodData.length; r++){
@@ -177,7 +210,7 @@ function approveItem(itemId, approverName) {
         }
         
       } else if (type === 'ลงทะเบียนต้นไม้') {
-        const treeSheet = getSpreadsheet().getSheetByName('ต้นไม้');
+        const treeSheet = SheetRepository.getSheet('ต้นไม้');
         
         treeSheet.appendRow([
           treeId, 
@@ -195,7 +228,7 @@ function approveItem(itemId, approverName) {
         
         // Add initial production record if quantity was provided during registration
         if (itemData.quantity && itemData.quantity > 0) {
-          const prodSheet = getSpreadsheet().getSheetByName('ผลผลิต');
+          const prodSheet = SheetRepository.getSheet('ผลผลิต');
           prodSheet.appendRow([`${seasonId}-${treeId}`, seasonId, treeId, itemData.quantity, 0, itemData.quantity, recorderName, date]);
         }
         
@@ -208,7 +241,7 @@ function approveItem(itemId, approverName) {
 }
 
 function rejectItem(itemId, reason) {
-  const sheet = getSpreadsheet().getSheetByName('คิวรออนุมัติ');
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] == itemId) {
@@ -221,7 +254,7 @@ function rejectItem(itemId, reason) {
 }
 
 function getDashboardByVariety(seasonId) {
-  const ss = getSpreadsheet();
+  const ss = SheetRepository.getSpreadsheet();
   
   const treeSheet = ss.getSheetByName('ต้นไม้');
   const treeData = treeSheet.getDataRange().getValues();
@@ -249,7 +282,7 @@ function getDashboardByVariety(seasonId) {
 }
 
 function getDashboardByGrade(seasonId) {
-  const ss = getSpreadsheet();
+  const ss = SheetRepository.getSpreadsheet();
   const harvestSheet = ss.getSheetByName('การเก็บเกี่ยว');
   const harvestData = harvestSheet.getDataRange().getValues();
   
@@ -272,7 +305,7 @@ function getDashboardByFlowerMonth(seasonId) {
 }
 
 function getDashboardTotal(seasonId) {
-  const sheet = getSpreadsheet().getSheetByName('ผลผลิต');
+  const sheet = SheetRepository.getSheet('ผลผลิต');
   const data = sheet.getDataRange().getValues();
   let total = 0, harvested = 0, remaining = 0;
   
@@ -292,7 +325,7 @@ function getDashboardSales(seasonId) {
 }
 
 function getDashboardYearComparison() {
-  const sheet = getSpreadsheet().getSheetByName('การเก็บเกี่ยว');
+  const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
   if(!sheet) return { '2567': 0 };
   const data = sheet.getDataRange().getValues();
   const yoy = {};
@@ -310,18 +343,18 @@ function getDashboardYearComparison() {
   return Object.keys(yoy).length > 0 ? yoy : { '2567': 0 };
 }
 
-function registerUser(userId, displayName, role) {
-  const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+function registerUser(userId, displayName, role, pictureUrl = '') {
+  const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === userId) return false; // exists
   }
-  sheet.appendRow([userId, displayName, role, '']);
+  sheet.appendRow([userId, displayName, role, pictureUrl]);
   return true;
 }
 
 function getUserRole(userId) {
-  const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+  const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] === userId) return data[i][2];
@@ -330,12 +363,12 @@ function getUserRole(userId) {
 }
 
 function openSeason(seasonId) {
-  const sheet = getSpreadsheet().getSheetByName('ฤดูกาล');
+  const sheet = SheetRepository.getSheet('ฤดูกาล');
   sheet.appendRow([seasonId, 'เปิด', new Date(), '']);
 }
 
 function closeSeason(seasonId) {
-  const sheet = getSpreadsheet().getSheetByName('ฤดูกาล');
+  const sheet = SheetRepository.getSheet('ฤดูกาล');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] == seasonId) {
@@ -351,7 +384,7 @@ function closeSeason(seasonId) {
 function loginWithPinWeb(pin) {
   const correctPin = '1234'; // สามารถเปลี่ยนให้ดึงจาก Config ได้ในอนาคต
   if (pin === correctPin) {
-    const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+    const sheet = SheetRepository.getSheet('ผู้ใช้');
     if(!sheet) return { success: false };
     const data = sheet.getDataRange().getValues();
     
@@ -377,13 +410,18 @@ function loginWithPinWeb(pin) {
 function checkUserAccessWeb(userId) {
   const role = getUserRole(userId);
   if (role === 'เจ้าของ' || role === 'admin') {
-    const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+    const sheet = SheetRepository.getSheet('ผู้ใช้');
     const data = sheet.getDataRange().getValues();
     let name = 'Unknown';
+    let pictureUrl = '';
     for(let i=1; i<data.length; i++){
-      if(data[i][0] === userId) { name = data[i][1]; break; }
+      if(data[i][0] === userId) { 
+        name = data[i][1]; 
+        pictureUrl = data[i][3] || '';
+        break; 
+      }
     }
-    return { hasAccess: true, user: { userId: userId, name: name, role: role } };
+    return { hasAccess: true, user: { userId: userId, name: name, role: role, pictureUrl: pictureUrl } };
   }
   return { hasAccess: false };
 }
@@ -392,17 +430,74 @@ function getDashboardDataWeb(userId) {
   if(!checkUserAccessWeb(userId).hasAccess) throw new Error("Unauthorized");
   
   const seasonId = getActiveSeason();
-  const treeSheet = getSpreadsheet().getSheetByName('ต้นไม้');
+  const ss = SheetRepository.getSpreadsheet();
+  
+  // 1. Total Trees & Variety
+  const treeSheet = ss.getSheetByName('ต้นไม้');
   const treeData = treeSheet.getDataRange().getValues();
   let totalTrees = treeData.length > 1 ? treeData.length - 1 : 0;
   
-  const pendingCount = getPendingCount();
-  
-  // Aggregate variety
   const variety = {};
   for(let i=1; i<treeData.length; i++){
     const v = treeData[i][1];
     if(v) variety[v] = (variety[v] || 0) + 1;
+  }
+  
+  const pendingCount = getPendingCount();
+  
+  // 2. Production Stats
+  const prodSheet = ss.getSheetByName('ผลผลิต');
+  let totalExpected = 0;
+  let totalRemaining = 0;
+  if(prodSheet) {
+    const prodData = prodSheet.getDataRange().getValues();
+    for(let i=1; i<prodData.length; i++) {
+      if(prodData[i][1] == seasonId) {
+        totalExpected += Number(prodData[i][3]) || 0;
+        totalRemaining += Number(prodData[i][5]) || 0;
+      }
+    }
+  }
+
+  // 3. Revenue & Sales Stats
+  const harvestSheet = ss.getSheetByName('การเก็บเกี่ยว');
+  let totalRevenue = 0;
+  let totalDamagedCount = 0;
+  let salesData = { 'A/B': 0, 'C': 0, 'D': 0, 'ตกไซส์': 0 };
+  let recentActivities = [];
+  
+  if (harvestSheet) {
+    const harvestData = harvestSheet.getDataRange().getValues();
+    for(let i=1; i<harvestData.length; i++){
+      if(harvestData[i][1] == seasonId) {
+        const reason = harvestData[i][4];
+        const grade = harvestData[i][5] || 'ตกไซส์';
+        const qty = Number(harvestData[i][3]) || 0;
+        const price = Number(harvestData[i][7]) || 0;
+        
+        if (reason === 'เสียหาย') {
+          totalDamagedCount += qty;
+        } else {
+          totalRevenue += price;
+          if (grade.includes('A') || grade.includes('B')) salesData['A/B'] += qty;
+          else if (grade.includes('C')) salesData['C'] += qty;
+          else if (grade.includes('D')) salesData['D'] += qty;
+          else salesData['ตกไซส์'] += qty;
+        }
+      }
+    }
+    
+    // Get recent 5 activities for this season
+    const filteredHarvests = harvestData.slice(1).filter(r => r[1] == seasonId);
+    filteredHarvests.reverse(); // Latest first
+    const top5 = filteredHarvests.slice(0, 5);
+    recentActivities = top5.map(r => ({
+      treeId: r[2],
+      action: r[4] === 'เสียหาย' ? 'เสียหาย' : 'ตัดขาย',
+      quantity: Number(r[3]),
+      date: r[11],
+      user: r[9]
+    }));
   }
   
   return {
@@ -410,6 +505,12 @@ function getDashboardDataWeb(userId) {
     totalTrees: totalTrees,
     pendingCount: pendingCount,
     variety: variety,
+    totalExpected: totalExpected,
+    totalRemaining: totalRemaining,
+    totalDamagedCount: totalDamagedCount,
+    totalRevenue: totalRevenue,
+    salesData: salesData,
+    recentActivities: recentActivities,
     yoy: getDashboardYearComparison()
   };
 }
@@ -423,7 +524,7 @@ function changeActiveSeasonWeb(newSeasonId, userId) {
   if (!newSeasonId) throw new Error("Season ID is required.");
   
   // 1. Update Config sheet
-  const configSheet = getSpreadsheet().getSheetByName('Config') || getSpreadsheet().getSheetByName('ตั้งค่า');
+  const configSheet = SheetRepository.getSheet('Config') || SheetRepository.getSheet('ตั้งค่า');
   if (configSheet) {
     const configData = configSheet.getDataRange().getValues();
     let found = false;
@@ -438,7 +539,7 @@ function changeActiveSeasonWeb(newSeasonId, userId) {
   }
   
   // 2. Add/Update Season in ฤดูกาล sheet
-  const seasonSheet = getSpreadsheet().getSheetByName('ฤดูกาล');
+  const seasonSheet = SheetRepository.getSheet('ฤดูกาล');
   if (seasonSheet) {
     const seasonData = seasonSheet.getDataRange().getValues();
     let exists = false;
@@ -460,26 +561,44 @@ function changeActiveSeasonWeb(newSeasonId, userId) {
 function getPendingItemsWeb(userId) {
   if(!checkUserAccessWeb(userId).hasAccess) throw new Error("Unauthorized");
   
-  const items = getPendingItems();
-  return items.map(item => {
-    let parsedData = {};
-    try { parsedData = JSON.parse(item['ข้อมูล JSON']); } catch(e) {}
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+  if (!sheet) return { pending: [], approved: [], rejected: [] };
+  const data = sheet.getDataRange().getValues();
+  
+  const result = { pending: [], approved: [], rejected: [] };
+  
+  // Return last 200 items to keep payload light
+  let count = 0;
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (count > 200) break;
+    count++;
     
-    // Convert Date object to string before returning to frontend
-    let dateStr = item['วันที่บันทึก'];
+    const status = data[i][3];
+    let parsedData = {};
+    try { parsedData = JSON.parse(data[i][4]); } catch(e) {}
+    
+    let dateStr = data[i][7];
     if (dateStr instanceof Date) {
       dateStr = dateStr.toISOString();
     }
     
-    return {
-      id: item['ID'],
-      type: item['ประเภท'],
-      treeId: item['รหัสต้น'],
+    const item = {
+      id: data[i][0],
+      type: data[i][1],
+      treeId: data[i][2],
+      status: status,
       data: parsedData,
-      recorderName: item['บันทึกโดย'],
-      date: dateStr
+      recorderName: data[i][5],
+      date: dateStr,
+      rejectReason: data[i][8] || ''
     };
-  });
+    
+    if (status === 'รออนุมัติ') result.pending.push(item);
+    else if (status === 'อนุมัติ') result.approved.push(item);
+    else if (status === 'ปฏิเสธ') result.rejected.push(item);
+  }
+  
+  return result;
 }
 
 /**
@@ -489,7 +608,7 @@ function getPendingItemsWeb(userId) {
  * @param {number} limit - จำนวนรายการสูงสุด
  */
 function getHarvestHistory(seasonId, treeId, limit) {
-  const sheet = getSpreadsheet().getSheetByName('การเก็บเกี่ยว');
+  const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
   if (!sheet) return [];
   const data = sheet.getDataRange().getValues();
   
@@ -512,6 +631,11 @@ function getHarvestHistory(seasonId, treeId, limit) {
   return records.slice(0, limit || 5);
 }
 
+function getTreeHistoryWeb(treeId) {
+  const seasonId = getActiveSeason();
+  return getHarvestHistory(seasonId, treeId, 10);
+}
+
 function approvePendingItemWeb(itemId, userId) {
   const auth = checkUserAccessWeb(userId);
   if(!auth.hasAccess) throw new Error("Unauthorized");
@@ -526,7 +650,7 @@ function rejectPendingItemWeb(itemId, reason, userId) {
 function getUsersWeb(userId) {
   if(!checkUserAccessWeb(userId).hasAccess) throw new Error("Unauthorized");
   
-  const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+  const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   const users = [];
   for(let i=1; i<data.length; i++){
@@ -543,10 +667,12 @@ function syncUserRichMenu(userId, role) {
   try {
     if (role === 'เจ้าของ' || role === 'admin') {
       linkRichMenuToUser(userId, "richmenu-e965ba0fb0d93888408f7dd7cdf2b336");
+    } else if (role === 'คนสวน') {
+      linkRichMenuToUser(userId, "richmenu-36623b6970c5491f16332221a8f5eaa2");
     } else if (role === 'Customer') {
       linkRichMenuToUser(userId, "richmenu-275478d29a58253eacf727ca4e00d179");
     } else {
-      // คนสวน — ใช้ Default menu
+      // ไม่มี role หรืออื่นๆ ให้ใช้ Default (ซึ่งต้องตั้ง Default เป็น Customer Menu)
       unlinkRichMenuFromUser(userId);
     }
   } catch (err) {
@@ -558,7 +684,7 @@ function updateUserRoleWeb(targetUserId, newRole, userId) {
   const auth = checkUserAccessWeb(userId);
   if(!auth.hasAccess || auth.user.role !== 'เจ้าของ') throw new Error("Unauthorized. Only owner can change roles.");
   
-  const sheet = getSpreadsheet().getSheetByName('ผู้ใช้');
+  const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for(let i=1; i<data.length; i++){
     if(data[i][0] === targetUserId){
@@ -574,7 +700,7 @@ function getAllTreesWeb(userId) {
   if(!checkUserAccessWeb(userId).hasAccess) throw new Error("Unauthorized");
   
   const seasonId = getActiveSeason();
-  const prodSheet = getSpreadsheet().getSheetByName('ผลผลิต');
+  const prodSheet = SheetRepository.getSheet('ผลผลิต');
   const prodData = prodSheet.getDataRange().getValues();
   const prodMap = {}; // map treeId -> fruitCount
   for(let i=1; i<prodData.length; i++) {
@@ -583,7 +709,7 @@ function getAllTreesWeb(userId) {
     }
   }
 
-  const sheet = getSpreadsheet().getSheetByName('ต้นไม้');
+  const sheet = SheetRepository.getSheet('ต้นไม้');
   const data = sheet.getDataRange().getValues();
   const trees = [];
   
@@ -610,7 +736,7 @@ function updateTreeWeb(treeData, userId) {
     throw new Error("Unauthorized. Only owner or admin can edit trees.");
   }
   
-  const sheet = getSpreadsheet().getSheetByName('ต้นไม้');
+  const sheet = SheetRepository.getSheet('ต้นไม้');
   const data = sheet.getDataRange().getValues();
   for(let i=1; i<data.length; i++){
     if(data[i][0] === treeData.id){
@@ -636,7 +762,7 @@ function updateTreeWeb(treeData, userId) {
       // Update Fruit Count in ผลผลิต
       if (treeData.fruitCount !== undefined && treeData.fruitCount !== '') {
         const seasonId = getActiveSeason();
-        const prodSheet = getSpreadsheet().getSheetByName('ผลผลิต');
+        const prodSheet = SheetRepository.getSheet('ผลผลิต');
         const prodData = prodSheet.getDataRange().getValues();
         let found = false;
         for(let r=1; r<prodData.length; r++){
@@ -663,28 +789,39 @@ function getIncomeDataWeb(userId) {
   if(!checkUserAccessWeb(userId).hasAccess) throw new Error("Unauthorized");
   
   const seasonId = getActiveSeason();
-  const harvestSheet = getSpreadsheet().getSheetByName('การเก็บเกี่ยว');
-  if (!harvestSheet) return { totalIncome: 0, items: [] };
+  const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  if (!harvestSheet) return { totalIncome: 0, totalVolume: 0, gradeSummary: [], items: [], yoy: {} };
   
   const data = harvestSheet.getDataRange().getValues();
   let totalIncome = 0;
+  let totalVolume = 0;
+  const gradeMap = {};
   const items = [];
   
-  // Headers: 'ID', 'รหัสฤดูกาล', 'รหัสต้น', 'จำนวนลูก', 'เหตุผล', 'เกรด', 'น้ำหนัก(กก.)', 'ราคา/กก.', 'รูปถ่าย URL', 'บันทึกโดย', 'LINE UserID', 'วันที่บันทึก', 'วันที่อนุมัติ', 'อนุมัติโดย'
   for(let i = 1; i < data.length; i++) {
     const rowSeason = data[i][1];
     const reason = data[i][4];
     
     if (rowSeason === seasonId && reason === 'ตัดขาย') {
       const weight = parseFloat(data[i][6]) || 0;
-      const price = parseFloat(data[i][7]) || 0;
+      const price = parseFloat(data[i][7]) || 0; // price per kg or total? Usually total if it's "price", wait. The current code says: const total = weight * price;
+      // Wait, in my previous edit for Overview, I used price directly as totalRevenue! But here it says `const total = weight * price;`.
+      // Let's stick to `weight * price` if price means price per kg. But wait, in the worker form, price is just price per kg? 
+      // Actually the column is "ราคา/กก." so `weight * price` is correct for total.
       const total = weight * price;
+      
       totalIncome += total;
+      totalVolume += weight;
+      
+      const grade = data[i][5] || 'ไม่ระบุ';
+      if (!gradeMap[grade]) gradeMap[grade] = { weight: 0, total: 0 };
+      gradeMap[grade].weight += weight;
+      gradeMap[grade].total += total;
       
       items.push({
-        date: data[i][12] || data[i][11], // Use approve date, fallback to record date
+        date: data[i][12] || data[i][11],
         treeId: data[i][2],
-        grade: data[i][5],
+        grade: grade,
         weight: weight,
         price: price,
         total: total
@@ -692,11 +829,20 @@ function getIncomeDataWeb(userId) {
     }
   }
   
-  // Sort items by date descending
+  const gradeSummary = Object.keys(gradeMap).map(k => ({
+    grade: k,
+    weight: gradeMap[k].weight,
+    avgPrice: gradeMap[k].weight > 0 ? (gradeMap[k].total / gradeMap[k].weight) : 0,
+    total: gradeMap[k].total
+  })).sort((a,b) => b.total - a.total);
+  
   items.sort((a, b) => new Date(b.date) - new Date(a.date));
   
   return {
     totalIncome: totalIncome,
-    items: items
+    totalVolume: totalVolume,
+    gradeSummary: gradeSummary,
+    items: items,
+    yoy: getDashboardYearComparison()
   };
 }

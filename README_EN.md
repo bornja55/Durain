@@ -26,6 +26,16 @@ All data is neatly organized and stored in Google Sheets, making it incredibly e
 
 ---
 
+## 📢 Recent Updates
+
+**Current Status: Stable & Deployed**
+
+*   **Cross-App Login Unblocked:** Resolved a major authentication bottleneck. Users can now seamlessly log into the dashboard via the LINE app on both iOS and Android without being blocked by cross-site tracking security policies.
+*   **Map & UI Upgrades:** The Dashboard now accurately renders the interactive Tree Location Map. We also overhauled the data table's underlying click mechanisms, resolving unresponsiveness in action buttons (Edit / QR Code).
+*   **Database & Bot Connectivity:** Fortified the submission pipeline to prevent duplicate data entries (double-submissions from slow connections). Additionally, the LINE Rich Menu logic has been fixed to accurately serve the correct interface based on the user's role (Owner vs Worker).
+
+---
+
 ## 🚀 Getting Started
 
 For developers or farm owners who want to set this up themselves, just follow our step-by-step guides:
