@@ -4,6 +4,15 @@ function doPost(e) {
       return HtmlService.createHtmlOutput("OK");
     }
 
+    // GAS cannot read the X-Line-Signature header itself (platform
+    // limitation), so the Cloudflare Worker verifies it and forwards here
+    // with a shared secret. Reject anything that skips the Worker.
+    const expectedSecret = getConfig('PROXY_SECRET');
+    const providedSecret = e.parameter && e.parameter.proxy_secret;
+    if (!expectedSecret || providedSecret !== expectedSecret) {
+      return HtmlService.createHtmlOutput("OK"); // fail closed, no details leaked
+    }
+
     const payload = JSON.parse(e.postData.contents);
     const events = payload.events || [];
     
@@ -51,8 +60,23 @@ function doPost(e) {
 function doGet(e) {
   try {
     let page = 'scanner';
+    let oauthCode = null;
+    let oauthState = null;
+    let oauthDenied = false;
+
     if (e && e.parameter) {
-      if (e.parameter.page) {
+      if (e.parameter.code) {
+        // LINE Login redirects back here with ?code=&state= after the user
+        // logs in. The registered redirect_uri is the bare /exec URL (no
+        // ?page=), so this is the only way to detect the callback - the
+        // dashboard is the only feature using this flow, so that's enough.
+        page = 'dashboard';
+        oauthCode = e.parameter.code;
+        oauthState = e.parameter.state;
+      } else if (e.parameter.error) {
+        page = 'dashboard';
+        oauthDenied = true;
+      } else if (e.parameter.page) {
         page = e.parameter.page;
       } else if (e.parameter['liff.state']) {
         const stateStr = decodeURIComponent(e.parameter['liff.state']);
@@ -61,11 +85,43 @@ function doGet(e) {
         }
       }
     }
-    
+
     if (page === 'dashboard') {
     // Return Dashboard Web App
     const template = HtmlService.createTemplateFromFile('Dashboard');
-    template.liffId = getConfig('LIFF_ID');
+    template.liffId = getConfig('LIFF_ID'); // still used for the tree QR deep link, unrelated to login
+    template.sessionToken = '';
+    template.loginError = '';
+
+    const redirectUri = getDashboardRedirectUri();
+
+    if (oauthCode) {
+      if (!consumeOAuthState(oauthState)) {
+        template.loginError = 'เซสชันเข้าสู่ระบบหมดอายุหรือไม่ถูกต้อง กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง';
+      } else {
+        const idToken = exchangeLineOAuthCode(oauthCode, redirectUri);
+        const loginResult = idToken ? loginWithLineIdToken(idToken) : { success: false };
+        if (loginResult.success) {
+          template.sessionToken = loginResult.sessionToken;
+        } else {
+          template.loginError = 'ไม่สามารถเข้าสู่ระบบด้วยบัญชี LINE นี้ได้ (ไม่มีสิทธิ์เข้าถึง หรือยืนยันตัวตนไม่สำเร็จ)';
+        }
+      }
+    } else if (oauthDenied) {
+      template.loginError = 'การเข้าสู่ระบบถูกยกเลิก';
+    }
+
+    // Fresh login link for the button - always generated so a failed
+    // attempt above can be retried without a full page reload.
+    template.loginUrl = buildLineLoginUrl(redirectUri);
+
+    // JSON.stringify these before they hit the <?!= ?> (raw, unescaped)
+    // scriptlets in Dashboard.html, so they come out as safe JS string
+    // literals no matter what characters they contain.
+    template.sessionTokenJson = JSON.stringify(template.sessionToken || '');
+    template.loginErrorJson = JSON.stringify(template.loginError || '');
+    template.loginUrlJson = JSON.stringify(template.loginUrl || '');
+
     return template.evaluate()
       .setTitle('ระบบจัดการสวนทุเรียน')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
@@ -227,6 +283,10 @@ function handlePostback(event) {
     }
   }
   else if (action === 'APPROVE') {
+    if (!isOwnerOrAdmin(role)) {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
     const itemId = params['id'];
     const profile = getProfile(userId);
     const result = approveItem(itemId, profile.displayName);
@@ -241,6 +301,10 @@ function handlePostback(event) {
     }
   }
   else if (action === 'REJECT_START') {
+    if (!isOwnerOrAdmin(role)) {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
     const itemId = params['id'];
     state.action = 'REJECT';
     state.step = 'WAIT_REASON';
@@ -249,6 +313,10 @@ function handlePostback(event) {
     replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์เหตุผลที่ปฏิเสธ'));
   }
   else if (action === 'APPROVAL_LIST') {
+    if (!isOwnerOrAdmin(role)) {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
     const items = getPendingItems();
     if (items.length === 0) {
       replyMessage(event.replyToken, buildSuccessFlex('ไม่มีรายการรออนุมัติ'));

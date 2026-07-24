@@ -14,7 +14,23 @@
       return url;
 
     }
-    return { getDriveImageUrl };
+
+    // Anything that ultimately comes from a LINE display name or free-typed
+    // text (registered users, custom variety names, rejection reasons, ...)
+    // must go through this before being concatenated into innerHTML.
+    // Otherwise a malicious LINE display name becomes stored XSS that runs
+    // in this authenticated Dashboard session.
+    function escapeHtml(value) {
+      if (value === null || value === undefined) return '';
+      return String(value)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+    }
+
+    return { getDriveImageUrl, escapeHtml };
   })();
 
   // ============================================================================
@@ -22,31 +38,74 @@
   // ============================================================================
   const AuthVM = (function () {
     let currentUser = null;
+    let sessionToken = null;
 
-    function handleLogin() {
-      const pin = document.getElementById('pinInput').value;
-      if (!pin) return;
+    // Replaces the old PIN-code login. LIFF's liff.init()/getIDToken() was
+    // tried first, but GAS always serves /exec pages from inside its own
+    // content sandbox iframe (a *-script.googleusercontent.com origin) -
+    // LIFF's SDK checks that the page's real URL is under the registered
+    // LIFF Endpoint URL, sees a totally different origin, and falls back to
+    // a broken same-origin verification path (tries to frame access.line.me,
+    // which sends X-Frame-Options: deny, so it just hangs/loops). That's a
+    // structural GAS-vs-LIFF incompatibility, not something fixable here.
+    //
+    // Fix: use plain LINE Login (OAuth2 authorization-code flow) instead of
+    // the LIFF SDK. doGet() in Code.gs already did the whole handshake
+    // server-side before this page was even rendered (see ?code=&state=
+    // handling there) - it either:
+    //   - templated a ready SERVER_SESSION_TOKEN (login succeeded), or
+    //   - templated a SERVER_LOGIN_ERROR (login failed/was denied), or
+    //   - templated neither (fresh visit, not logged in yet) plus a
+    //     LINE_LOGIN_URL for the button to navigate to.
+    // No SDK, no origin check, no iframe issues - it's just a normal
+    // top-level browser redirect to access.line.me and back.
+    async function init() {
+      try {
+        document.getElementById('loginError').classList.add('hidden');
 
-      document.getElementById('loginError').textContent = "กำลังตรวจสอบ...";
+        if (typeof SERVER_LOGIN_ERROR !== 'undefined' && SERVER_LOGIN_ERROR) {
+          showLoginError(SERVER_LOGIN_ERROR);
+          showLoginButton();
+          return;
+        }
 
-      google.script.run
-        .withSuccessHandler((res) => {
-          if (res.success) {
-            localStorage.setItem('adminUserId', res.userId);
-            document.getElementById('login').classList.add('hidden');
-            AuthVM.verifyAccess(res.userId);
-          } else {
-            document.getElementById('loginError').textContent = "รหัส PIN ไม่ถูกต้อง";
-          }
-        })
-        .withFailureHandler((err) => {
-          document.getElementById('loginError').textContent = "ข้อผิดพลาด: " + err.message;
-        })
-        .loginWithPinWeb(pin);
+        if (typeof SERVER_SESSION_TOKEN !== 'undefined' && SERVER_SESSION_TOKEN) {
+          sessionToken = SERVER_SESSION_TOKEN;
+          document.getElementById('loginStatus').textContent = 'กำลังตรวจสอบสิทธิ์...';
+          document.getElementById('loading').classList.remove('hidden');
+          AuthVM.verifyAccess(sessionToken);
+          return;
+        }
 
+        // Not logged in yet - show the button; clicking it does a real,
+        // user-initiated top-level navigation to LINE's login page.
+        showLoginButton();
+      } catch (err) {
+        showLoginError('เกิดข้อผิดพลาด: ' + err.message);
+      }
     }
 
-    function verifyAccess(uid) {
+    function showLoginError(msg) {
+      document.getElementById('login').classList.remove('hidden');
+      const el = document.getElementById('loginError');
+      el.textContent = msg;
+      el.classList.remove('hidden');
+    }
+
+    function showLoginButton() {
+      const status = document.getElementById('loginStatus');
+      if (status) status.textContent = 'กรุณากดปุ่มด้านล่างเพื่อเข้าสู่ระบบด้วย LINE';
+      const btn = document.getElementById('loginTopButton');
+      if (btn) btn.classList.remove('hidden');
+    }
+
+    function goToLineLogin() {
+      if (typeof LINE_LOGIN_URL !== 'undefined' && LINE_LOGIN_URL) {
+        window.top.location.href = LINE_LOGIN_URL;
+      }
+    }
+
+    function verifyAccess(token) {
 
       document.getElementById('loading').classList.remove('hidden');
       google.script.run
@@ -55,7 +114,7 @@
           document.getElementById('loading').classList.add('hidden');
           alert("Error: " + err.message);
         })
-        .checkUserAccessWeb(uid);
+        .checkUserAccessWeb(token);
 
     }
 
@@ -92,16 +151,20 @@
       alert("ข้อผิดพลาด: " + msg);
     }
 
-    window.handleLogin = handleLogin;
+    window.authGoToLineLogin = goToLineLogin;
 
     return {
       getCurrentUser: () => currentUser,
-      handleLogin,
+      getSessionToken: () => sessionToken,
+      init,
       verifyAccess,
       onAccessSuccess,
-      onAccessError
+      onAccessError,
+      goToLineLogin
     };
   })();
+
+  document.addEventListener('DOMContentLoaded', () => AuthVM.init());
 
   // ============================================================================
   // Navigation View Model
@@ -154,7 +217,7 @@
       google.script.run
         .withSuccessHandler(DashboardVM.render)
         .withFailureHandler((err) => alert(err.message))
-        .getDashboardDataWeb(AuthVM.getCurrentUser().userId);
+        .getDashboardDataWeb(AuthVM.getSessionToken());
     }
 
     function render(data) {
@@ -287,7 +350,7 @@
               '\x3C/div\x3E' +
               '\x3Cdiv class="flex-1 min-w-0"\x3E' +
               '\x3Cp class="font-bold text-gray-800 text-sm truncate"\x3Eต้นที่ ' + act.treeId + ' (' + act.action + ')\x3C/p\x3E' +
-              '\x3Cp class="text-xs text-gray-500 truncate"\x3Eบันทึกโดย: ' + (act.user || '-') + '\x3C/p\x3E' +
+              '\x3Cp class="text-xs text-gray-500 truncate"\x3Eบันทึกโดย: ' + UtilsVM.escapeHtml(act.user || '-') + '\x3C/p\x3E' +
               '\x3C/div\x3E' +
               '\x3Cdiv class="text-right"\x3E' +
               '\x3Cp class="font-black text-gray-900"\x3E' + act.quantity + ' ลูก\x3C/p\x3E' +
@@ -362,7 +425,7 @@
             alert(err.message);
             DashboardVM.load();
           })
-          .changeActiveSeasonWeb(newSeason.trim(), AuthVM.getCurrentUser().userId);
+          .changeActiveSeasonWeb(newSeason.trim(), AuthVM.getSessionToken());
       }
 
     }
@@ -387,7 +450,7 @@
           renderList();
         })
         .withFailureHandler((err) => alert(err.message))
-        .getPendingItemsWeb(AuthVM.getCurrentUser().userId);
+        .getPendingItemsWeb(AuthVM.getSessionToken());
     }
 
     function renderList() {
@@ -412,7 +475,7 @@
         for (const [k, v] of Object.entries(item.data || {})) {
           if (k !== 'photoUrl' && v) {
             let label = k === 'variety' ? 'สายพันธุ์' : k === 'age' ? 'อายุ (ปี)' : k === 'quantity' ? 'จำนวน' : k === 'grade' ? 'เกรด' : k === 'price' ? 'ราคา' : k === 'reason' ? 'เหตุผล' : k === 'weight' ? 'น้ำหนัก (กก.)' : k;
-            detailsHtml += '\x3Cspan class="bg-gray-50 text-gray-700 text-xs px-2 py-1 rounded border border-gray-100"\x3E\x3Cspan class="font-bold text-gray-500"\x3E' + label + ':\x3C/span\x3E ' + v + '\x3C/span\x3E';
+            detailsHtml += '\x3Cspan class="bg-gray-50 text-gray-700 text-xs px-2 py-1 rounded border border-gray-100"\x3E\x3Cspan class="font-bold text-gray-500"\x3E' + label + ':\x3C/span\x3E ' + UtilsVM.escapeHtml(v) + '\x3C/span\x3E';
           }
         }
         detailsHtml += '</div>';
@@ -427,7 +490,7 @@
             '\x3Cbutton data-reject-id="' + item.id + '" class="flex-1 bg-red-50 hover:bg-red-100 text-red-600 py-2 rounded-xl font-bold transition-colors"\x3Eปฏิเสธ\x3C/button\x3E' +
             '\x3C/div\x3E';
         } else if (currentPendingTab === 'rejected' && item.rejectReason) {
-          actionsHtml = '\x3Cp class="mt-3 text-sm text-red-500 bg-red-50 p-2 rounded-lg font-medium"\x3Eเหตุผลที่ปฏิเสธ: ' + item.rejectReason + '\x3C/p\x3E';
+          actionsHtml = '\x3Cp class="mt-3 text-sm text-red-500 bg-red-50 p-2 rounded-lg font-medium"\x3Eเหตุผลที่ปฏิเสธ: ' + UtilsVM.escapeHtml(item.rejectReason) + '\x3C/p\x3E';
         }
 
         html += '\x3Cdiv id="item-' + item.id + '" class="bg-white rounded-2xl p-5 shadow-sm border border-gray-100 flex flex-col sm:flex-row gap-5"\x3E' +
@@ -440,7 +503,7 @@
           '\x3Cspan class="text-xs text-gray-400 font-medium"\x3E' + new Date(item.date).toLocaleString('th-TH') + '\x3C/span\x3E' +
           '\x3C/div\x3E' +
           '\x3Cdiv class="mt-3 space-y-1"\x3E' + detailsHtml +
-          '\x3Cp class="text-xs text-gray-400 mt-1 flex items-center gap-1"\x3E\x3Cspan class="material-symbols-rounded text-[14px]"\x3Eperson\x3C/span\x3E บันทึกโดย: ' + item.recorderName + '\x3C/p\x3E' +
+          '\x3Cp class="text-xs text-gray-400 mt-1 flex items-center gap-1"\x3E\x3Cspan class="material-symbols-rounded text-[14px]"\x3Eperson\x3C/span\x3E บันทึกโดย: ' + UtilsVM.escapeHtml(item.recorderName) + '\x3C/p\x3E' +
           '\x3C/div\x3E' + actionsHtml +
           '\x3C/div\x3E' +
           (photoUrl ? '\x3Cdiv class="w-full sm:w-48 shrink-0 flex items-center justify-center"\x3E' + photoHtml + '\x3C/div\x3E' : '') +
@@ -457,7 +520,7 @@
           document.getElementById('item-' + id).remove();
           DashboardVM.load(); // update counts
         })
-        .approvePendingItemWeb(id, AuthVM.getCurrentUser().userId);
+        .approvePendingItemWeb(id, AuthVM.getSessionToken());
 
     }
 
@@ -470,7 +533,7 @@
           document.getElementById('item-' + id).remove();
           DashboardVM.load(); // update counts
         })
-        .rejectPendingItemWeb(id, reason, AuthVM.getCurrentUser().userId);
+        .rejectPendingItemWeb(id, reason, AuthVM.getSessionToken());
 
     }
 
@@ -504,38 +567,62 @@
     let data = [];
     let currentEditImages = [];
     let treeDetailMapInstance = null;
+    // Bulk QR print selection - a Set of tree IDs, kept separate from
+    // `data` so it survives search filtering (display() only re-renders a
+    // filtered subset, it never resets selection).
+    let selectedIds = new Set();
+    // Whatever array was last passed to display() - i.e. the currently
+    // visible rows (all trees, or a search-filtered subset). Select-all /
+    // select-unprinted act on this, not the full `data`, so they only
+    // touch what's actually on screen.
+    let currentView = [];
 
     function load() {
       document.getElementById('treeTableBody').innerHTML = '<tr><td colspan="4" style="text-align:center;">กำลังโหลด...</td></tr>';
       google.script.run
         .withSuccessHandler(TreesVM.render)
         .withFailureHandler((err) => alert(err.message))
-        .getAllTreesWeb(AuthVM.getCurrentUser().userId);
+        .getAllTreesWeb(AuthVM.getSessionToken());
     }
 
     function render(trees) {
       data = trees;
+      // Drop selected IDs that no longer exist in the fresh data (tree
+      // deleted/renamed elsewhere) so the count/print button never refers
+      // to stale IDs.
+      const liveIds = new Set(trees.map(t => t.id));
+      selectedIds.forEach(id => { if (!liveIds.has(id)) selectedIds.delete(id); });
       display(data);
+      updateSelectionUI();
     }
 
     function display(trees) {
+      currentView = trees;
       const getDriveImageUrl = UtilsVM.getDriveImageUrl;
 
       const tbody = document.getElementById('treeTableBody');
       if (trees.length === 0) {
-        tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="6" style="text-align:center;">ไม่มีข้อมูลต้นไม้\x3C/td\x3E\x3C/tr\x3E';
+        tbody.innerHTML = '\x3Ctr>\x3Ctd colspan="8" style="text-align:center;">ไม่มีข้อมูลต้นไม้\x3C/td\x3E\x3C/tr\x3E';
         return;
       }
       let html = '';
       trees.forEach(t => {
         const displayUrl = getDriveImageUrl(t.photoUrl);
         let imgHtml = displayUrl ? '\x3Cimg src="' + displayUrl + '" class="w-10 h-10 object-cover rounded-lg mx-auto shadow-sm"\x3E' : '\x3Cdiv class="w-10 h-10 bg-gray-100 rounded-lg flex items-center justify-center text-[10px] text-gray-400 mx-auto"\x3Eไม่มีรูป\x3C/div\x3E';
+        const isChecked = selectedIds.has(t.id) ? ' checked' : '';
+        const qrCellHtml = t.qrPrinted
+          ? '\x3Cspan class="inline-flex items-center gap-1 text-[10px] font-medium text-green-700 bg-green-50 px-2 py-1 rounded-full" title="ปริ้นล่าสุด: ' + UtilsVM.escapeHtml(t.qrPrinted) + '"\x3E\x3Cspan class="material-symbols-rounded text-xs"\x3Echeck_circle\x3C/span\x3Eปริ้นแล้ว\x3C/span\x3E'
+          : '\x3Cspan class="inline-flex items-center text-[10px] font-medium text-gray-400 bg-gray-50 px-2 py-1 rounded-full"\x3Eยังไม่ปริ้น\x3C/span\x3E';
         html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors cursor-pointer" onclick="TreesVM.viewTree(\'' + t.id + '\')"\x3E' +
+          '\x3Ctd class="p-4 text-center" onclick="event.stopPropagation()"\x3E' +
+          '\x3Cinput type="checkbox"' + isChecked + ' onchange="TreesVM.toggleTreeSelect(\'' + t.id + '\', this.checked)"\x3E' +
+          '\x3C/td\x3E' +
           '\x3Ctd class="p-4 text-center"\x3E' + imgHtml + '\x3C/td\x3E' +
           '\x3Ctd class="p-4 font-medium"\x3E' + t.id + '\x3C/td\x3E' +
-          '\x3Ctd class="p-4"\x3E' + (t.variety || '-') + '\x3C/td\x3E' +
+          '\x3Ctd class="p-4"\x3E' + UtilsVM.escapeHtml(t.variety || '-') + '\x3C/td\x3E' +
           '\x3Ctd class="p-4"\x3E' + (t.age || '-') + '\x3C/td\x3E' +
           '\x3Ctd class="p-4 text-right font-medium"\x3E' + (t.fruitCount || '0') + '\x3C/td\x3E' +
+          '\x3Ctd class="p-4 text-center"\x3E' + qrCellHtml + '\x3C/td\x3E' +
           '\x3Ctd class="p-4 text-center" onclick="event.stopPropagation()"\x3E' +
           '\x3Cdiv class="flex items-center justify-center gap-2"\x3E' +
           '\x3Cbutton class="bg-primary hover:bg-[#689f38] text-white px-3 py-1.5 rounded-lg text-xs font-medium transition-colors" onclick="TreesVM.editTree(\'' + t.id + '\')"\x3Eแก้ไข\x3C/button\x3E' +
@@ -546,6 +633,46 @@
       });
       tbody.innerHTML = html;
 
+    }
+
+    // ---- Bulk QR selection helpers ----
+
+    function toggleTreeSelect(id, checked) {
+      if (checked) selectedIds.add(id); else selectedIds.delete(id);
+      updateSelectionUI();
+    }
+
+    function toggleSelectAll(checked) {
+      // Only affects the currently visible rows (all trees, or whatever
+      // the search box has filtered down to) - matches what the checkbox
+      // in the header visually controls.
+      currentView.forEach(t => { if (checked) selectedIds.add(t.id); else selectedIds.delete(t.id); });
+      display(currentView);
+      updateSelectionUI();
+    }
+
+    function selectUnprinted() {
+      currentView.forEach(t => { if (!t.qrPrinted) selectedIds.add(t.id); });
+      display(currentView);
+      updateSelectionUI();
+    }
+
+    function clearSelection() {
+      selectedIds.clear();
+      display(currentView);
+      updateSelectionUI();
+    }
+
+    function updateSelectionUI() {
+      const countEl = document.getElementById('treeSelectedCount');
+      if (countEl) countEl.textContent = 'เลือกแล้ว ' + selectedIds.size + ' ต้น';
+      const btn = document.getElementById('btnPrintSelectedQR');
+      if (btn) btn.disabled = selectedIds.size === 0;
+      const selectAllBox = document.getElementById('treeSelectAll');
+      if (selectAllBox) {
+        const rowBoxes = document.querySelectorAll('#treeTableBody input[type="checkbox"]');
+        selectAllBox.checked = rowBoxes.length > 0 && Array.from(rowBoxes).every(cb => cb.checked);
+      }
     }
 
     function filter() {
@@ -610,23 +737,37 @@
       }
 
       const gallery = document.getElementById('detailPhotoGallery');
+      const prevBtn = document.getElementById('detailPhotoPrev');
+      const nextBtn = document.getElementById('detailPhotoNext');
       gallery.innerHTML = '';
-      if (t.photoUrl) {
-        const urls = t.photoUrl.split(',').filter(u => u.trim() !== '');
-        if (urls.length > 0) {
-          urls.forEach(url => {
-            const dUrl = getDriveImageUrl(url);
-            const img = document.createElement('img');
-            img.src = dUrl;
-            img.className = 'w-4/5 sm:w-64 h-full object-cover shrink-0 snap-center rounded-xl shadow-sm border border-gray-100';
-            gallery.appendChild(img);
-          });
-        } else {
-          gallery.innerHTML = '<div class="shrink-0 w-full h-full bg-gray-200 flex items-center justify-center rounded-xl text-gray-500 shadow-sm border border-gray-100">ไม่มีรูปภาพ</div>';
-        }
+      gallery.scrollLeft = 0;
+
+      const urls = t.photoUrl ? t.photoUrl.split(',').filter(u => u.trim() !== '') : [];
+      if (urls.length > 0) {
+        // Full-size URLs for the lightbox - same list, tapping any thumbnail
+        // opens it at index i so prev/next inside the lightbox can page
+        // through the rest of this tree's photos too.
+        const displayUrls = urls.map(getDriveImageUrl);
+        displayUrls.forEach((dUrl, i) => {
+          const img = document.createElement('img');
+          img.src = dUrl;
+          img.className = 'w-4/5 sm:w-64 h-full object-cover shrink-0 snap-center rounded-xl shadow-sm border border-gray-100 cursor-pointer';
+          img.onclick = () => openPhotoLightbox(displayUrls, i);
+          gallery.appendChild(img);
+        });
       } else {
         gallery.innerHTML = '<div class="shrink-0 w-full h-full bg-gray-200 flex items-center justify-center rounded-xl text-gray-500 shadow-sm border border-gray-100">ไม่มีรูปภาพ</div>';
       }
+
+      // Arrow buttons only make sense with more than one photo to page
+      // through - hide them entirely otherwise instead of showing
+      // useless disabled-looking buttons.
+      const showArrows = urls.length > 1;
+      [prevBtn, nextBtn].forEach(btn => {
+        if (!btn) return;
+        btn.classList.toggle('hidden', !showArrows);
+        btn.style.display = showArrows ? 'flex' : 'none';
+      });
 
       // Fetch history
       const historyContainer = document.getElementById('detailHistoryContainer');
@@ -665,7 +806,7 @@
         .withFailureHandler(err => {
           historyContainer.innerHTML = '<div class="text-center py-4 text-red-500 text-sm bg-white rounded-xl shadow-sm border border-gray-100">โหลดประวัติล้มเหลว</div>';
         })
-        .getTreeHistoryWeb(t.id);
+        .getTreeHistoryWeb(t.id, AuthVM.getSessionToken());
 
       document.getElementById('btnDetailEdit').onclick = () => {
         closeTreeDetailModal();
@@ -679,6 +820,18 @@
 
       openTreeDetailModal();
 
+    }
+
+    // Steps the photo gallery one "page" (roughly one photo's width) left
+    // (-1) or right (+1). Snap-scroll (snap-x on the container, snap-center
+    // on each image) takes care of settling on the nearest photo, so this
+    // doesn't need to track an exact index.
+    function scrollTreePhotos(direction) {
+      const gallery = document.getElementById('detailPhotoGallery');
+      if (!gallery) return;
+      const firstImg = gallery.querySelector('img');
+      const step = (firstImg ? firstImg.getBoundingClientRect().width : gallery.clientWidth) + 12; // +gap-3
+      gallery.scrollBy({ left: step * direction, behavior: 'smooth' });
     }
 
     function editTree(treeId) {
@@ -849,7 +1002,7 @@
           else alert('Error: ' + res.error);
         })
         .withFailureHandler((err) => alert(err.message))
-        .updateTreeWeb(data, AuthVM.getCurrentUser().userId);
+        .updateTreeWeb(data, AuthVM.getSessionToken());
 
     }
 
@@ -859,19 +1012,156 @@
       }
       if (!treeId) return;
 
+      // Open the tab immediately (synchronously, in direct response to the
+      // click) so popup blockers don't kill it - then fill it in once the
+      // server call resolves. Opening it inside the .withSuccessHandler
+      // callback instead would make it an async-triggered window.open(),
+      // which most browsers block.
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write('<p style="font-family:sans-serif;padding:24px;">กำลังโหลดข้อมูล...</p>');
+      }
+
+      google.script.run
+        .withSuccessHandler((info) => {
+          renderQrPrintPage(win, info);
+        })
+        .withFailureHandler((err) => {
+          if (win) {
+            win.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#c00;">โหลดข้อมูลไม่สำเร็จ: ' + UtilsVM.escapeHtml(err.message) + '</p>';
+          }
+        })
+        .getTreePrintInfoWeb(treeId, AuthVM.getSessionToken());
+    }
+
+    // Builds the printable tag: tree ID/age above a large 1200x1200 QR code
+    // (sized up from the old 300x300 so it stays sharp when printed and hung
+    // on the actual tree), with remaining-fruit/last-record details below
+    // the QR. Sized to actually fill an A4 page instead of leaving most of
+    // it blank - see QR_TAG_CSS/buildQrTagHtml below, shared with the bulk
+    // print flow so both look identical.
+    function renderQrPrintPage(win, info) {
+      if (!win) return;
+      const qrUrl = buildQrImageUrl(info.id);
+
+      win.document.open();
+      win.document.write(
+        '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">' +
+        '<title>QR ต้นทุเรียน ' + UtilsVM.escapeHtml(info.id) + '</title>' +
+        '<style>' + QR_TAG_CSS + '</style></head><body>' +
+        buildQrTagHtml(info, qrUrl) +
+        '<button class="print-btn" onclick="window.print()">พิมพ์</button>' +
+        '</body></html>'
+      );
+      win.document.close();
+    }
+
+    // Shared QR image URL + tag markup/styling for both the single-tree
+    // print (renderQrPrintPage) and the bulk print (renderQrPrintPageBulk) -
+    // kept as one source so tweaking the layout only has to happen once.
+    function buildQrImageUrl(treeId) {
       const qrData = encodeURIComponent('https://liff.line.me/' + LIFF_ID + '?tree=' + treeId);
-      const qrUrl = 'https://quickchart.io/qr?text=' + qrData + '&size=300';
-      window.open(qrUrl, '_blank');
+      return 'https://quickchart.io/qr?text=' + qrData + '&size=1200';
+    }
+
+    const QR_TAG_CSS =
+      'body{font-family:"Sarabun","Noto Sans Thai",sans-serif;text-align:center;padding:24px;}' +
+      '.tag{max-width:700px;margin:0 auto;padding-bottom:32px;}' +
+      '.row-top{display:flex;justify-content:space-between;align-items:baseline;margin-bottom:16px;}' +
+      '.row-top b{font-size:44px;font-weight:800;}' +
+      '.row-top span{font-size:26px;color:#333;}' +
+      'img{width:100%;max-width:600px;height:auto;display:block;margin:0 auto;}' +
+      '.row-bottom{display:flex;justify-content:space-between;font-size:26px;margin-top:20px;color:#222;}' +
+      '.print-btn{margin:0 auto 24px;padding:12px 32px;font-size:18px;cursor:pointer;display:block;}' +
+      '@media print{.print-btn{display:none;}}';
+
+    function buildQrTagHtml(info, qrUrl) {
+      const esc = UtilsVM.escapeHtml;
+      return '<div class="tag">' +
+        '<div class="row-top"><b>' + esc(info.id) + '</b><span>' + esc(info.variety || '-') + ' | อายุ ' + esc(info.age) + ' ปี</span></div>' +
+        '<img src="' + qrUrl + '" alt="QR ' + esc(info.id) + '">' +
+        '<div class="row-bottom"><span>ผลคงเหลือ ' + esc(info.fruitCount) + ' ลูก</span><span>บันทึกล่าสุด ' + esc(info.lastRecordDate) + '</span></div>' +
+        '</div>';
+    }
+
+    // ---- Bulk QR print ----
+    // Fetches info for every selected tree in one round trip
+    // (getTreesPrintInfoBulkWeb), renders one print window with a tag per
+    // tree (page-break between each so they print as separate pages/tags),
+    // then stamps column H ("QR") in ต้นไม้ via markTreesPrintedWeb so the
+    // "ปริ้นแล้ว" status shows up next time the list loads.
+    function printSelectedQR() {
+      const ids = Array.from(selectedIds);
+      if (ids.length === 0) return;
+
+      // Same synchronous-open trick as the single-tree flow above: open
+      // the tab immediately, in direct response to the click, so popup
+      // blockers don't kill it - fill it in once the server call resolves.
+      const win = window.open('', '_blank');
+      if (win) {
+        win.document.write('<p style="font-family:sans-serif;padding:24px;">กำลังโหลดข้อมูล ' + ids.length + ' ต้น...</p>');
+      }
+
+      google.script.run
+        .withSuccessHandler((infos) => {
+          renderQrPrintPageBulk(win, infos);
+
+          // Only stamp "printed" after the tag page actually rendered -
+          // if the info fetch above failed, nothing gets marked.
+          google.script.run
+            .withFailureHandler((err) => console.error('markTreesPrintedWeb failed:', err.message))
+            .withSuccessHandler(() => {
+              selectedIds.clear();
+              load(); // refresh so the QR column shows the new "ปริ้นแล้ว" status
+            })
+            .markTreesPrintedWeb(ids, AuthVM.getSessionToken());
+        })
+        .withFailureHandler((err) => {
+          if (win) {
+            win.document.body.innerHTML = '<p style="font-family:sans-serif;padding:24px;color:#c00;">โหลดข้อมูลไม่สำเร็จ: ' + UtilsVM.escapeHtml(err.message) + '</p>';
+          }
+        })
+        .getTreesPrintInfoBulkWeb(ids, AuthVM.getSessionToken());
+    }
+
+    // Same tag layout/CSS as renderQrPrintPage (single tree, see QR_TAG_CSS/
+    // buildQrTagHtml above), repeated once per tree with page-break-after so
+    // each comes out as its own printed page.
+    function renderQrPrintPageBulk(win, infos) {
+      if (!win) return;
+
+      const tagsHtml = infos.map((info) => buildQrTagHtml(info, buildQrImageUrl(info.id))).join('');
+
+      win.document.open();
+      win.document.write(
+        '<!DOCTYPE html><html lang="th"><head><meta charset="UTF-8">' +
+        '<title>QR ต้นทุเรียน (' + infos.length + ' ต้น)</title>' +
+        '<style>' + QR_TAG_CSS +
+        '.tag{page-break-after:always;} .tag:last-child{page-break-after:auto;}' +
+        '</style></head><body>' +
+        '<button class="print-btn" onclick="window.print()">พิมพ์ทั้งหมด (' + infos.length + ' ต้น)</button>' +
+        tagsHtml +
+        '</body></html>'
+      );
+      win.document.close();
     }
 
     window.filterTrees = filter;
     window.viewTree = viewTree;
     window.handlePhotoUpload = handlePhotoUpload;
     window.saveTree = saveTree;
+    // Inline onclick="" attributes run in the page's global scope, which
+    // can't reliably resolve `DashboardVM` (a const-scoped IIFE result) by
+    // name - same reason saveTree is exported above. Export this the same
+    // way instead of referencing DashboardVM.scrollTreePhotos directly.
+    window.scrollTreePhotos = scrollTreePhotos;
 
     // Global listener handles clicks now
 
-    return { load, render, display, viewTree, editTree, renderPhotoGallery, setHeroImage, handlePhotoUpload, saveTree, printQR };
+    return {
+      load, render, display, viewTree, editTree, renderPhotoGallery, setHeroImage, handlePhotoUpload, saveTree, printQR, scrollTreePhotos,
+      toggleTreeSelect, toggleSelectAll, selectUnprinted, clearSelection, printSelectedQR
+    };
   })();
 
   // ============================================================================
@@ -883,7 +1173,7 @@
       google.script.run
         .withSuccessHandler(IncomeVM.render)
         .withFailureHandler((err) => alert(err.message))
-        .getIncomeDataWeb(AuthVM.getCurrentUser().userId);
+        .getIncomeDataWeb(AuthVM.getSessionToken());
     }
 
     function render(data) {
@@ -925,7 +1215,7 @@
       google.script.run
         .withSuccessHandler(UsersVM.render)
         .withFailureHandler((err) => alert(err.message))
-        .getUsersWeb(AuthVM.getCurrentUser().userId);
+        .getUsersWeb(AuthVM.getSessionToken());
     }
 
     function render(users) {
@@ -938,7 +1228,7 @@
       users.forEach(u => {
         const isSelf = u.userId === currentUser.userId;
         html += '\x3Ctr class="hover:bg-gray-50/50 transition-colors"\x3E' +
-          '\x3Ctd class="p-4"\x3E' + u.name + '\x3C/td\x3E' +
+          '\x3Ctd class="p-4"\x3E' + UtilsVM.escapeHtml(u.name) + '\x3C/td\x3E' +
           '\x3Ctd class="p-4"\x3E' +
           '\x3Cselect class="px-3 py-1.5 bg-gray-50 border-none rounded-lg text-sm focus:ring-2 focus:ring-primary" data-role-id="' + u.userId + '" ' + (isSelf ? 'disabled' : '') + '\x3E' +
           '\x3Coption value="Customer" ' + (u.role === 'Customer' ? 'selected' : '') + '\x3ECustomer\x3C/option\x3E' +
@@ -959,7 +1249,7 @@
       google.script.run
         .withSuccessHandler(() => alert('อัปเดตสิทธิ์สำเร็จ'))
         .withFailureHandler((err) => alert(err.message))
-        .updateUserRoleWeb(targetId, newRole, AuthVM.getCurrentUser().userId);
+        .updateUserRoleWeb(targetId, newRole, AuthVM.getSessionToken());
 
     }
 
@@ -996,7 +1286,7 @@
               DashboardVM.fetchWeather(trees);
             }
           })
-          .getAllTreesWeb(AuthVM.getCurrentUser().userId);
+          .getAllTreesWeb(AuthVM.getSessionToken());
       } else {
         MapVM.plotTrees();
       }
@@ -1013,7 +1303,7 @@
           const lng = parseFloat(t.lng);
           if (!isNaN(lat) && !isNaN(lng)) {
             const marker = L.marker([lat, lng]);
-            marker.bindPopup('\x3Cb\x3Eรหัส: ' + t.id + '\x3C/b\x3E\x3Cbr\x3Eสายพันธุ์: ' + t.variety + '\x3Cbr\x3Eอายุ: ' + t.age + ' ปี\x3Cbr\x3E' +
+            marker.bindPopup('\x3Cb\x3Eรหัส: ' + UtilsVM.escapeHtml(t.id) + '\x3C/b\x3E\x3Cbr\x3Eสายพันธุ์: ' + UtilsVM.escapeHtml(t.variety) + '\x3Cbr\x3Eอายุ: ' + UtilsVM.escapeHtml(t.age) + ' ปี\x3Cbr\x3E' +
               '\x3Cdiv class="mt-2 flex gap-3"\x3E' +
               '\x3Cbutton type="button" class="text-primary font-bold underline" onclick="TreesVM.viewTree(\'' + t.id + '\')"\x3Eดูรายละเอียด\x3C/button\x3E' +
               '\x3Cbutton type="button" class="text-amber-600 font-bold underline" onclick="TreesVM.editTree(\'' + t.id + '\')"\x3Eแก้ไข\x3C/button\x3E' +
@@ -1042,15 +1332,9 @@
   // ============================================================================
   // Initialization
   // ============================================================================
-  window.onload = () => {
-    // Check if there is an LIFF state or existing session
-    const urlParams = new URLSearchParams(window.location.search);
-    const pin = urlParams.get('pin');
-    if (pin) {
-      document.getElementById('pinInput').value = pin;
-      AuthVM.handleLogin();
-    }
-  };
+  // (Login now happens via AuthVM.init() on DOMContentLoaded, further up.
+  // The old ?pin=... URL shortcut has been removed along with PIN auth -
+  // it would have leaked the login credential into browser history/logs.)
 
   // -----------------------------------------------------
   // Event Delegation

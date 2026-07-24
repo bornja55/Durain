@@ -4,15 +4,11 @@
  * @returns {string} The config value
  */
 function getConfig(key) {
-  const sheet = getSpreadsheet().getSheetByName('Config');
-  const data = sheet.getDataRange().getValues();
-  for (let i = 0; i < data.length; i++) {
-    const rowKey = data[i][0] ? data[i][0].toString().trim() : '';
-    if (rowKey === key) {
-      return data[i][1] ? data[i][1].toString().trim() : null;
-    }
-  }
-  return null;
+  // Secrets and settings now live in Project Settings > Script Properties
+  // instead of the Config sheet (plaintext tokens in a shared sheet was a
+  // real exposure risk). See setup/SHEETS_STRUCTURE.md for the migration note.
+  const value = PropertiesService.getScriptProperties().getProperty(key);
+  return value ? value.toString().trim() : null;
 }
 
 /**

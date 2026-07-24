@@ -1,0 +1,16 @@
+name = "durian-line-verifier"
+main = "index.js"
+compatibility_date = "2026-07-24"
+workers_dev = true
+
+# Secrets (LINE_CHANNEL_SECRET, PROXY_SECRET) must NOT be put in this file.
+# Set them with:
+#   wrangler secret put LINE_CHANNEL_SECRET
+#   wrangler secret put PROXY_SECRET
+#
+# GAS_EXEC_URL is not secret, so it can live here as a plain var,
+# or be set in the dashboard instead. Uncomment and fill in if you
+# deploy via CLI:
+#
+# [vars]
+# GAS_EXEC_URL = "https://script.google.com/macros/s/XXXXXXXX/exec"

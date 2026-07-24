@@ -30,9 +30,10 @@ All data is neatly organized and stored in Google Sheets, making it incredibly e
 
 **Current Status: Stable & Deployed**
 
-*   **Cross-App Login Unblocked:** Resolved a major authentication bottleneck. Users can now seamlessly log into the dashboard via the LINE app on both iOS and Android without being blocked by cross-site tracking security policies.
-*   **Map & UI Upgrades:** The Dashboard now accurately renders the interactive Tree Location Map. We also overhauled the data table's underlying click mechanisms, resolving unresponsiveness in action buttons (Edit / QR Code).
-*   **Database & Bot Connectivity:** Fortified the submission pipeline to prevent duplicate data entries (double-submissions from slow connections). Additionally, the LINE Rich Menu logic has been fixed to accurately serve the correct interface based on the user's role (Owner vs Worker).
+*   **Fixed Inaccurate Remaining-Yield Counts:** Approving a sale or damage report used to leave the "remaining on tree" figure unchanged, so it drifted further from reality over time. It now updates correctly every time a report is approved.
+*   **Real Sales Revenue on the Overview Report:** The LINE "Overview" menu now shows actual sales revenue and total weight sold, replacing the placeholder figures used before.
+*   **Full-Screen Photo Viewer:** Tapping a photo in a tree's detail view now opens it full-screen, with swipe/arrow navigation to browse the rest of that tree's photos — no more squinting at tiny thumbnails on mobile.
+*   **Upgraded Printable QR Tags:** QR codes are now bigger and sharper, with the tree's name, variety, age, remaining fruit count, and last-recorded date printed right on the tag. Owners can also select multiple trees and print all their tags in one batch, with the system tracking which trees have already been printed so nothing gets missed or duplicated.
 
 ---
 

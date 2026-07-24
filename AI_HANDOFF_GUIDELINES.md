@@ -1,0 +1,58 @@
+# Handoff: Durian Farm Management System — Security Hardening
+
+## Status
+Security hardening is functionally complete and the new LINE Login flow is confirmed working in production by the user. A small follow-up UI feature (photo carousel arrows) was just implemented and is pending deploy/test. Temporary debug code is still live in production and should be cleaned up. Nothing has been pushed to GitHub since the pre-fix backup commit.
+
+## Goal
+User asked for a full security/production-readiness review (via the `scrutinize` skill) of their live Durian Farm Management System (Google Apps Script + LINE Official Account/LIFF + Google Sheets + Drive, handling real revenue/approval data), then to fix the CRITICAL issues found using `debug-mantra` discipline, after first backing up the repo to GitHub.
+
+## What's done
+- **GitHub backup**: user pushed commit `ac7e8aa` + tag `backup-pre-security-fix-2026-07-24` to `https://github.com/bornja55/Durain.git` before any changes.
+- **LINE webhook signature verification**: GAS `doPost(e)` cannot read HTTP headers at all (confirmed Google platform limitation), so a Cloudflare Worker (`https://durian-line-verifier.siraphob-an.workers.dev/`, deployed by the user, code in `cloudflare-worker/`) verifies `X-Line-Signature` (HMAC-SHA256) and forwards the request to GAS with a shared `?proxy_secret=` query param. `doPost` in `gas/Code.gs` rejects anything missing/mismatching it.
+- **Authorization on bot actions**: `isOwnerOrAdmin(role)` helper added; gates `APPROVE`, `REJECT_START`, `APPROVAL_LIST` postback actions in `gas/Code.gs`.
+- **Config migrated off the sheet**: all secrets/settings (`CHANNEL_SECRET`, `CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, `ACTIVE_SEASON`, `OWNER_LINE_ID`, plus new `PROXY_SECRET` and `LOGIN_CHANNEL_SECRET`) now live in GAS Script Properties, not the plaintext Config sheet. `getConfig()` in `gas/LineAPI.gs` reads `PropertiesService` directly.
+- **Dashboard login rewritten twice**:
+  1. First replaced the hardcoded PIN "1234" with LIFF (`liff.init()`/`getIDToken()`) — this **did not work**: GAS always serves web app content inside its own sandboxed content iframe on a dynamically-generated `*-script.googleusercontent.com` origin (different from the `script.google.com` URL in the address bar). LIFF's SDK validates the page's real URL against the registered LIFF Endpoint URL and fails this check every time, falling back to a broken flow that tries to frame `access.line.me` (blocked by `X-Frame-Options: deny`).
+  2. Replaced with **plain LINE Login (OAuth2 authorization-code flow)**, done entirely server-side in `gas/Code.gs` `doGet()` — no LIFF SDK, no client-side origin check possible. This is now confirmed working end-to-end.
+- **Discovered mid-implementation**: this project's LIFF app lives under a **separate LINE Login channel**, not the Messaging API (bot) channel — confirmed by LINE's own `invalid client_secret` error plus web research. Added a new Script Property `LOGIN_CHANNEL_SECRET` (the LINE Login channel's own secret) used only for the OAuth code-exchange call; `CHANNEL_SECRET` (Messaging API channel) is untouched and still used for the bot/webhook.
+- **CSRF `state` protection**: originally a random value stored in `CacheService` + TTL — this showed unexplained mismatches in testing even well inside the TTL window, so it was replaced with a **stateless, self-verifying signed token** (`timestamp + '.' + HMAC-SHA256(timestamp, CHANNEL_SECRET)`, no storage/lookup at all).
+- **XSS fixes**: `UtilsVM.escapeHtml()` added in `gas/Dashboard.js.html`, applied at 6 injection points (user names, rejection reasons, map popups, etc.).
+- **UI feature (latest, not yet deploy-tested)**: added prev/next arrow buttons to the tree-detail popup's photo gallery in `gas/Dashboard.html` / `gas/Dashboard.js.html`, shown only when a tree has more than one photo.
+
+## What's next
+1. Confirm the user has deployed and tested the photo-carousel-arrows change (Apps Script editor → Deploy → Manage deployments → New version → Deploy → open a tree with multiple photos in the Dashboard).
+2. **Clean up temporary debug code** added while diagnosing the OAuth login (see "Context" below) — this is currently live in production and should be removed/simplified now that root causes are understood:
+   - `gas/Code.gs` `doGet()`: currently calls `debugConsumeOAuthState`, `debugExchangeLineOAuthCode`, `debugLoginWithLineIdToken` and appends `[debug: ...]` detail to user-facing error messages.
+   - `gas/SheetOperations.gs`: `consumeOAuthState`/`exchangeLineOAuthCode`/`loginWithLineIdToken` are now thin wrappers around their `debug*` counterparts — fine to keep the wrappers, but `doGet` should go back to calling the plain (non-debug) versions and drop the `[debug: ...]` message suffixes.
+3. Once cleanup + carousel are confirmed, do the **final commit + push to GitHub** — the user's stated intent for closing out this whole body of work ("ทดสอบผ่านหมดแล้วบอกได้เลย จะ commit ทั้งหมด (รวมงานก่อนหน้า) push ขึ้น GitHub ปิดงานเป็นชุดสุดท้าย"). Nothing has been pushed since the pre-fix backup commit — all of the above work only exists in the user's local OneDrive-mounted `gas/` folder and in the live Apps Script deployment.
+4. Not yet actioned (offered, not requested): extend `OWNER_LINE_ID` / the pending-approval push notification to support multiple comma-separated LINE IDs.
+5. Deferred, lower priority, from the original `scrutinize` report (WARNING/NITPICK level, not committed to): no `LockService` locking around ID generation/approval (race condition risk), dead `generateAllQRCodes()` function, deprecated `chart.googleapis.com` QR generation endpoint.
+
+## Key decisions made
+- **Cloudflare Worker scoped to the webhook only**, no custom domain — user explicitly did not want the Worker fronting the whole web app, and wanted to stay on the free `workers.dev` subdomain.
+- **Plain LINE Login OAuth2 (Option C) chosen over extending the Cloudflare Worker with a login page (Option A) or a separate static host (Option B)** — zero new infrastructure, stays entirely inside GAS, matches the user's preference for simplicity. Trade-off accepted: no more "auto-login because already inside the LINE app" convenience; user sees LINE's own confirm screen each time the session expires.
+- **State/CSRF check redesigned to be stateless (HMAC-signed timestamp)** rather than debugging `CacheService`'s cross-execution reliability further — eliminates the dependency entirely regardless of root cause.
+- **`CHANNEL_SECRET` and `LOGIN_CHANNEL_SECRET` must stay separate** — they belong to two different LINE channels (Messaging API vs. LINE Login) under the same provider. Do not consolidate them.
+
+## Files changed or created
+- `gas/Code.gs` — `doGet()` rewritten to detect `?code=&state=` (OAuth callback) vs `?page=` vs default scanner page; runs state verification, code-exchange, login/session creation server-side before rendering `Dashboard.html`; templates `sessionToken`/`loginError`/`loginUrl` (as JSON-safe `*Json` variants) into the page. Role checks added to `APPROVE`/`REJECT_START`/`APPROVAL_LIST`.
+- `gas/SheetOperations.gs` — `isOwnerOrAdmin`, `changeActiveSeasonWeb` (Script Properties + auto-close prior season), `verifyLineIdToken`, `createDashboardSession`/`resolveDashboardSession` (CacheService-based session tokens, 6h TTL — unrelated to the OAuth-state bug, works fine), `loginWithLineIdToken` (renamed from `loginWithLiffWeb`) + `debugLoginWithLineIdToken`, `generateOAuthState`/`consumeOAuthState` (HMAC-based) + `debugConsumeOAuthState`, `signOAuthTimestamp`, `getDashboardChannelId`, `buildLineLoginUrl`, `exchangeLineOAuthCode` + `debugExchangeLineOAuthCode` (uses `LOGIN_CHANNEL_SECRET`), `getDashboardRedirectUri`. All `*Web` functions take a `sessionToken` param instead of a raw `userId`.
+- `gas/LineAPI.gs` — `getConfig(key)` reads Script Properties instead of the Config sheet.
+- `gas/Dashboard.js.html` — `AuthVM` rewritten (no LIFF SDK; reads `SERVER_SESSION_TOKEN`/`SERVER_LOGIN_ERROR`/`LINE_LOGIN_URL` templated globals; `goToLineLogin()` does a plain top-level redirect); `UtilsVM.escapeHtml()` added; `viewTree()` updated for the photo-arrows feature; new `scrollTreePhotos(direction)` added to `DashboardVM` and exported.
+- `gas/Dashboard.html` — login screen markup replaced (LINE Login button, no PIN); LIFF SDK `<script>` tag removed; templated JS vars added; tree-detail photo gallery wrapped in a `relative` div with new `#detailPhotoPrev`/`#detailPhotoNext` buttons; removed dead `#detailPhotoPreview`/`#detailNoPhoto` placeholder elements.
+- `cloudflare-worker/index.js`, `wrangler.toml`, `README.md` (new) — the signature-verifying Worker, deployed by the user.
+- New Script Properties added: `PROXY_SECRET`, `LOGIN_CHANNEL_SECRET` (in addition to the pre-existing ones migrated from the Config sheet).
+
+## Context the next agent needs
+- **Never ask the user for actual secret values** (`CHANNEL_SECRET`, `LOGIN_CHANNEL_SECRET`, `PROXY_SECRET`, etc.) — these are entered directly by the user into GAS Script Properties / the Cloudflare Worker, never shared in chat.
+- **GAS `doPost(e)`/`doGet(e)` cannot read HTTP headers at all** (confirmed Google platform limitation) — this is why the Cloudflare Worker proxy exists.
+- **GAS web app content is always served inside Google's own sandboxed content iframe** on a dynamically-generated `*-script.googleusercontent.com` origin, different from the `script.google.com` URL shown in the address bar. This breaks anything doing same-origin/endpoint-URL validation from inside the page — this is why LIFF could never work reliably here, and why an earlier "break out of the iframe" attempt also failed (`window.location.href` from inside that sandbox points to the wrong, internal URL, not the public page).
+- **The Apps Script "Executions" log** (left sidebar, clock icon) was the key diagnostic tool throughout — always check it (shows deployment version, function, status, duration) before theorizing further about a live bug.
+- **Every code change needs an explicit new deployment**: Deploy → Manage deployments → Edit (pencil icon) → New version → Deploy. Saving the file alone does NOT update the live `/exec` URL — this caused confusion multiple times during this session.
+- **The user copies file contents manually into the Apps Script web editor** (not clasp/git-synced) — after any local edit, tell them exactly which file(s) to paste in.
+- The user's working folder is OneDrive-synced; git operations from a sandboxed/agent environment against this path can fail with `EPERM` (FUSE filesystem limitation). If git is needed again, either work in a real local filesystem or have the user run the git commands themselves.
+- `LIFF_ID` format is `"{channelId}-{randomString}"` — `getDashboardChannelId()` derives the channel ID via `.split('-')[0]`. This is the **LINE Login channel's** ID, not the Messaging API channel's.
+- User preferences (established across this whole engagement): concise, direct responses, Thai-primary with English technical terms where natural, step-by-step instructions for anything requiring manual action, and edit files directly rather than showing diffs first.
+
+## How to resume
+Ask the user whether they've deployed and tested the tree-detail photo-carousel-arrows change. If confirmed working, clean up the temporary OAuth debug diagnostics in `gas/Code.gs`/`gas/SheetOperations.gs` (see "What's next" #2), then help the user run the final `git add -A && git commit && git push` of all accumulated changes to `https://github.com/bornja55/Durain.git` to close out this security-hardening effort.
