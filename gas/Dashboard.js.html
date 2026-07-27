@@ -297,11 +297,11 @@
       const ctxDonut = document.getElementById('salesDonutChart');
       if (ctxDonut) {
         if (salesDonutChartInstance) salesDonutChartInstance.destroy();
-        
+
         const salesData = data.salesData || {};
         const donutLabels = Object.keys(salesData);
         const donutValues = Object.values(salesData);
-        
+
         salesDonutChartInstance = new Chart(ctxDonut.getContext('2d'), {
           type: 'doughnut',
           data: {
@@ -343,7 +343,7 @@
             const iconStr = isDamage ? 'warning' : 'payments';
             const colorClass = isDamage ? 'bg-red-50 text-red-500' : 'bg-green-50 text-green-500';
             const dateStr = act.date ? new Date(act.date).toLocaleDateString('th-TH', { day: 'numeric', month: 'short' }) : '-';
-            
+
             actHtml += '\x3Cdiv class="flex items-center gap-4 bg-gray-50/50 p-3 rounded-xl border border-gray-100"\x3E' +
               '\x3Cdiv class="w-10 h-10 rounded-full flex items-center justify-center shrink-0 ' + colorClass + '"\x3E' +
               '\x3Cspan class="material-symbols-rounded text-[20px]"\x3E' + iconStr + '\x3C/span\x3E' +
@@ -726,7 +726,7 @@
               if (layer instanceof L.Marker) treeDetailMapInstance.removeLayer(layer);
             });
             L.marker([lat, lng]).addTo(treeDetailMapInstance);
-            
+
             setTimeout(() => {
               if (treeDetailMapInstance) treeDetailMapInstance.invalidateSize();
             }, 300);
@@ -790,16 +790,16 @@
             const dt = new Date(h.date).toLocaleDateString('th-TH');
 
             html += '\x3Cdiv class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3"\x3E' +
-                 icon +
-                 '\x3Cdiv class="flex-1"\x3E' +
-                   '\x3Cp class="font-bold text-gray-800 text-sm"\x3E' + title + '\x3C/p\x3E' +
-                   '\x3Cp class="text-xs text-gray-500"\x3E' + details + '\x3C/p\x3E' +
-                 '\x3C/div\x3E' +
-                 '\x3Cdiv class="text-right"\x3E' +
-                   '\x3Cp class="font-black text-gray-900 text-lg"\x3E' + h.quantity + '\x3C/p\x3E' +
-                   '\x3Cp class="text-[10px] text-gray-400 font-medium"\x3E' + dt + '\x3C/p\x3E' +
-                 '\x3C/div\x3E' +
-               '\x3C/div\x3E';
+              icon +
+              '\x3Cdiv class="flex-1"\x3E' +
+              '\x3Cp class="font-bold text-gray-800 text-sm"\x3E' + title + '\x3C/p\x3E' +
+              '\x3Cp class="text-xs text-gray-500"\x3E' + details + '\x3C/p\x3E' +
+              '\x3C/div\x3E' +
+              '\x3Cdiv class="text-right"\x3E' +
+              '\x3Cp class="font-black text-gray-900 text-lg"\x3E' + h.quantity + '\x3C/p\x3E' +
+              '\x3Cp class="text-[10px] text-gray-400 font-medium"\x3E' + dt + '\x3C/p\x3E' +
+              '\x3C/div\x3E' +
+              '\x3C/div\x3E';
           });
           historyContainer.innerHTML = html;
         })
@@ -1244,13 +1244,23 @@
 
     }
 
-    function changeRole(userId) {
+    // BUG FIX: เดิมรับพารามิเตอร์แค่ userId แต่ในตัวฟังก์ชันอ้าง targetId/newRole
+    // ที่ไม่มีอยู่จริง -> ReferenceError ทุกครั้งที่เปลี่ยน dropdown ค่าเลยไม่เคย
+    // ถูกส่งไป server (ดูเหมือน "ไม่มีปุ่มเซฟ") ตอนนี้เซฟทันทีเมื่อเปลี่ยน
+    // dropdown + ถามยืนยันก่อน + refresh ตารางหลังสำเร็จ
+    function changeRole(targetId, newRole) {
+      const target = data.find(u => u.userId === targetId);
+      const name = target ? target.name : targetId;
+
+      if (!confirm('ยืนยันเปลี่ยนสิทธิ์ของ "' + name + '" เป็น "' + newRole + '" ?')) {
+        UsersVM.load(); // ผู้ใช้กดยกเลิก -> คืนค่า dropdown เป็นค่าเดิม
+        return;
+      }
 
       google.script.run
-        .withSuccessHandler(() => alert('อัปเดตสิทธิ์สำเร็จ'))
-        .withFailureHandler((err) => alert(err.message))
+        .withSuccessHandler(() => { alert('อัปเดตสิทธิ์สำเร็จ'); UsersVM.load(); })
+        .withFailureHandler((err) => { alert(err.message); UsersVM.load(); })
         .updateUserRoleWeb(targetId, newRole, AuthVM.getSessionToken());
-
     }
 
     window.changeRole = changeRole;
@@ -1348,7 +1358,7 @@
 
     const editBtn = e.target.closest('[data-edit-id]');
     if (editBtn) TreesVM.editTree(editBtn.getAttribute('data-edit-id'));
-    
+
     const viewBtn = e.target.closest('[data-view-id]');
     if (viewBtn) TreesVM.viewTree(viewBtn.getAttribute('data-view-id'));
 

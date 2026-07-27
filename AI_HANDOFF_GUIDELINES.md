@@ -1,58 +1,109 @@
-# Handoff: Durian Farm Management System — Security Hardening
+# Handoff: Durian Farm Management System — Role/Menu & Scan-Flow Bug Fixes
 
 ## Status
-Security hardening is functionally complete and the new LINE Login flow is confirmed working in production by the user. A small follow-up UI feature (photo carousel arrows) was just implemented and is pending deploy/test. Temporary debug code is still live in production and should be cleaned up. Nothing has been pushed to GitHub since the pre-fix backup commit.
+บั๊ก 8 ตัวแก้เสร็จแล้วในไฟล์ local + **automated test 117 เคสผ่านทั้งหมด** + push ขึ้น GitHub แล้ว
+
+**สิ่งที่ยังไม่เสร็จ:** ผู้ใช้ยังไม่ได้ deploy รอบล่าสุดและยืนยันบนเครื่องจริงครบทุกข้อ — ที่ยังไม่รู้ผลคือ รูปในหน้าต้นไม้ / ปุ่มเปิดแชท (`target="_top"`) / flow ตัดจำหน่ายจนจบ / race condition สองคนพร้อมกัน (ดู `docs/QA_CHECKLIST.md`)
 
 ## Goal
-User asked for a full security/production-readiness review (via the `scrutinize` skill) of their live Durian Farm Management System (Google Apps Script + LINE Official Account/LIFF + Google Sheets + Drive, handling real revenue/approval data), then to fix the CRITICAL issues found using `debug-mantra` discipline, after first backing up the repo to GitHub.
+ผู้ใช้ขอให้แก้บั๊กด้วย `debug-mantra` discipline แล้วทำ QA ทั้งระบบ โดยแจ้งว่าอะไรต้องให้ผู้ใช้ทดสอบเองเพราะข้อจำกัดของ agent
 
-## What's done
-- **GitHub backup**: user pushed commit `ac7e8aa` + tag `backup-pre-security-fix-2026-07-24` to `https://github.com/bornja55/Durain.git` before any changes.
-- **LINE webhook signature verification**: GAS `doPost(e)` cannot read HTTP headers at all (confirmed Google platform limitation), so a Cloudflare Worker (`https://durian-line-verifier.siraphob-an.workers.dev/`, deployed by the user, code in `cloudflare-worker/`) verifies `X-Line-Signature` (HMAC-SHA256) and forwards the request to GAS with a shared `?proxy_secret=` query param. `doPost` in `gas/Code.gs` rejects anything missing/mismatching it.
-- **Authorization on bot actions**: `isOwnerOrAdmin(role)` helper added; gates `APPROVE`, `REJECT_START`, `APPROVAL_LIST` postback actions in `gas/Code.gs`.
-- **Config migrated off the sheet**: all secrets/settings (`CHANNEL_SECRET`, `CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `SPREADSHEET_ID`, `DRIVE_FOLDER_ID`, `ACTIVE_SEASON`, `OWNER_LINE_ID`, plus new `PROXY_SECRET` and `LOGIN_CHANNEL_SECRET`) now live in GAS Script Properties, not the plaintext Config sheet. `getConfig()` in `gas/LineAPI.gs` reads `PropertiesService` directly.
-- **Dashboard login rewritten twice**:
-  1. First replaced the hardcoded PIN "1234" with LIFF (`liff.init()`/`getIDToken()`) — this **did not work**: GAS always serves web app content inside its own sandboxed content iframe on a dynamically-generated `*-script.googleusercontent.com` origin (different from the `script.google.com` URL in the address bar). LIFF's SDK validates the page's real URL against the registered LIFF Endpoint URL and fails this check every time, falling back to a broken flow that tries to frame `access.line.me` (blocked by `X-Frame-Options: deny`).
-  2. Replaced with **plain LINE Login (OAuth2 authorization-code flow)**, done entirely server-side in `gas/Code.gs` `doGet()` — no LIFF SDK, no client-side origin check possible. This is now confirmed working end-to-end.
-- **Discovered mid-implementation**: this project's LIFF app lives under a **separate LINE Login channel**, not the Messaging API (bot) channel — confirmed by LINE's own `invalid client_secret` error plus web research. Added a new Script Property `LOGIN_CHANNEL_SECRET` (the LINE Login channel's own secret) used only for the OAuth code-exchange call; `CHANNEL_SECRET` (Messaging API channel) is untouched and still used for the bot/webhook.
-- **CSRF `state` protection**: originally a random value stored in `CacheService` + TTL — this showed unexplained mismatches in testing even well inside the TTL window, so it was replaced with a **stateless, self-verifying signed token** (`timestamp + '.' + HMAC-SHA256(timestamp, CHANNEL_SECRET)`, no storage/lookup at all).
-- **XSS fixes**: `UtilsVM.escapeHtml()` added in `gas/Dashboard.js.html`, applied at 6 injection points (user names, rejection reasons, map popups, etc.).
-- **UI feature (latest, not yet deploy-tested)**: added prev/next arrow buttons to the tree-detail popup's photo gallery in `gas/Dashboard.html` / `gas/Dashboard.js.html`, shown only when a tree has more than one photo.
+## What's done (session นี้)
+
+### บั๊ก 1: เจ้าของสวนกลายเป็นลูกค้า — root cause หายาก เดาผิด 3 รอบ
+สมมติฐานที่ **ผิด** (บันทึกไว้กันเสียเวลาซ้ำ):
+1. ~~menu ID ที่โค้ดใช้ถูกลบไปแล้ว~~ → `listRichMenus()` พิสูจน์ว่ามีอยู่ครบ 5 เมนู
+2. ~~เมนูมีอยู่แต่ยังไม่อัปโหลดรูป จึง link ไม่ได้~~ → ทุกเมนูมีรูปครบ
+3. ~~userId ในชีตไม่ตรงกับ `OWNER_LINE_ID`~~ → `diagnoseUserRows()` พิสูจน์ว่าตรง
+
+**Root cause จริง**: `syncUserRichMenu()` ถูกเรียกแค่ 3 จุด — ตอน `handleFollow`, ตอนสร้างผู้ใช้ใหม่, และตอนแก้ role ผ่าน Dashboard — **ไม่มีจุดไหนอัปเดตเมนูเมื่อ role ถูกแก้ด้วยมือในชีต** บัญชี "ตะวัน" add friend ตอนยังไม่มีสิทธิ์ → ถูกตั้งเป็น Customer + ผูกเมนูลูกค้า → แก้ชีตเป็น "เจ้าของ" ทีหลัง → เมนูบน LINE ไม่มีอะไรไปสั่งให้เปลี่ยน ค้างถาวร
+
+**แก้**: เพิ่ม `ensureRichMenuMatchesRole()` (SheetOperations.gs) เรียกทุก event ใน `handlePostback`/`handleTextMessage` — จำ role ที่ผูกไปล่าสุดใน CacheService ยิง LINE API เฉพาะตอนไม่ตรง (ทดสอบแล้ว: ทัก 5 ครั้ง ยิงครั้งเดียว)
+
+### บั๊ก 2: ลูกค้าสแกน QR แล้วค้างที่ liff.init
+`doGet()` ไม่เคยอ่าน `tree` param → เสิร์ฟหน้า LIFF scanner ผิดหน้า → ค้างเพราะ LIFF ใช้ใน GAS iframe ไม่ได้ (ข้อจำกัดเดิมที่รู้อยู่แล้ว)
+**แก้**: route `?tree=X` (รวมที่มาทาง `liff.state`) ไปหน้าใหม่ `TreeInfo.html` — server-rendered ล้วน ไม่มี LIFF SDK เลย สแกนด้วยกล้องอะไรก็เปิดได้
+
+### บั๊ก 3: หน้าเว็บแก้โรลไม่มีปุ่มเซฟ
+`UsersVM.changeRole(userId)` อ้างตัวแปร `targetId`/`newRole` ที่ไม่มีอยู่จริง → ReferenceError เงียบๆ ทุกครั้ง
+**แก้**: รับพารามิเตอร์ให้ถูก + confirm ก่อนเซฟ + revert dropdown ถ้ายกเลิก + reload หลังสำเร็จ
+
+### บั๊ก 4 (เจอเองระหว่าง QA): flow ตัดจำหน่ายทำรายการไม่จบเลย
+บล็อกจัดการ `"ส่งรูปครบแล้ว"`/`"ข้าม"` ถูกเขียนซ้อนอยู่ในสาขา `REGISTER_TREE` ทั้งที่โค้ดข้างในเช็ค `state.action === 'HARVEST'` → dead code เข้าไม่ถึงตลอดกาล คนสวนถ่ายรูปตาชั่งเสร็จ กดปุ่มแล้วบอทเงียบ ทำรายการไม่จบสักครั้งตั้งแต่ต้น
+**แก้**: ย้าย WAIT_PHOTO ออกมาเป็นสาขาระดับบนใช้ร่วมกันทั้งสอง flow + เพิ่ม fallback ถ้าพิมพ์อย่างอื่นระหว่างรอรูป
+
+### บั๊ก 5-6 (ผู้ใช้เจอบนมือถือจริง รอบล่าสุด — แก้แล้วแต่ยังไม่ทดสอบ)
+- **รูปไม่ขึ้นในหน้าต้นไม้**: `savePhotoToDrive()` เก็บ `file.getUrl()` ซึ่งเป็นหน้า viewer ไม่ใช่ไฟล์รูป → เพิ่ม `toDriveImageUrl()` ฝั่ง server แปลงเป็น `drive.google.com/thumbnail?id=...` (ตรรกะเดียวกับ `UtilsVM.getDriveImageUrl()` ที่ Dashboard ใช้อยู่แล้ว)
+- **กดปุ่มบันทึกแล้วค้างที่ "โปรดเปิด LINE"**: ลิงก์ navigate ภายใน GAS iframe → LINE บล็อกการเปิดแอป → ใส่ `target="_top"` + เพิ่มปุ่ม "คัดลอกคำสั่ง" เป็นทางสำรอง
+
+### บั๊ก 7: admin แก้สิทธิ์ผู้ใช้ไม่ได้ ("Only owner can change roles")
+`updateUserRoleWeb` เช็ค `role !== 'เจ้าของ'` ซึ่งไม่สอดคล้องกับที่อื่นที่ admin ทำได้ทุกอย่างผ่าน `isOwnerOrAdmin`
+**แก้** (ผู้ใช้เลือก policy เอง): admin แก้ได้เท่าเจ้าของ รวมถึงตั้งคนอื่นเป็น "เจ้าของ" ได้ + เพิ่ม guard ห้ามแก้สิทธิ์ตัวเอง (กันล็อกตัวเองออก — UI disable อยู่แล้วแต่ server ต้องกันด้วย)
+
+### บั๊ก 8: ลูกค้าเห็นปุ่มตัดจำหน่าย/บันทึกผลผลิตในหน้าต้นไม้
+หน้า TreeInfo เปิดจากการสแกน QR แบบไม่มี login — `doGet` ไม่มีทางรู้ว่าใครเปิด (LINE ไม่แนบ userId มากับ HTTP request ธรรมดา, LIFF SDK ใช้ไม่ได้ใน GAS iframe)
+**แก้**: ใช้ LINE Login OAuth ที่มีอยู่แล้ว
+- ขยาย `generateOAuthState(returnTo)` ให้เซ็น `returnTo` รวมใน HMAC → พา login กลับมาที่ **หน้าต้นไม้เดิม** ไม่ใช่ Dashboard (คนสวนไม่มีสิทธิ์ Dashboard อยู่แล้ว)
+- `consumeOAuthState` เปลี่ยนจากคืน boolean เป็น `{valid, returnTo}` — **ผู้เรียกทุกที่ต้องอ่าน `.valid`** (object เป็น truthy เสมอ ถ้าลืมจะกลายเป็นช่องโหว่เงียบๆ) แก้ที่ `doGet` แล้ว
+- `getMyRoleWeb(sessionToken)` + `canRecordFromScan(role)` (คนสวน/เจ้าของ/admin เท่านั้น)
+- **server ไม่ส่ง `BOT_BASIC_ID` ไปหน้าเว็บเลยถ้าไม่มีสิทธิ์** — ซ่อนที่ต้นทาง ไม่ใช่ซ่อนด้วย CSS
+- TreeInfo จำ session ใน localStorage 6 ชม. (try/catch — GAS iframe บางเครื่องบล็อก storage) คนสวนสแกนต้นถัดไปไม่ต้อง login ซ้ำ
+- ลูกค้าเห็นแค่ลิงก์เล็ก "🔑 เจ้าหน้าที่สวน" ถ้า login แล้วไม่มีสิทธิ์ก็ไม่แสดงอะไรเพิ่ม
+
+### งานอื่นที่ปิดในรอบนี้
+- **LockService** (ค้างจาก handoff เดิม ข้อ 5): ครอบ `registerUser` และครอบ `generateNextTreeId()`+`addToPendingQueue()` เป็นก้อนเดียวใน `CONFIRM` (ช่องว่างระหว่างสองฟังก์ชันคือจุดที่รหัสต้นไม้ซ้ำได้) — helper `withScriptLock()` รอ lock 10 วิ
+- **Error log ย้ายออกจากชีต Config**: helper `logErrorToSheet()` เขียนลงชีต **"Error Log"** แทน ใช้ที่ `doPost`/`doGet`/`replyMessage`/`linkRichMenuToUser`
+- **`linkRichMenuToUser` เคยกลืน error เงียบๆ** (ไม่มี `muteHttpExceptions` → throw → ถูก catch ใน `syncUserRichMenu` ลง console ที่ไม่มีใครดู) — **นี่คือเหตุผลที่บั๊ก 1 หายากขนาดนี้** ตอนนี้ลง Error Log พร้อม userId + menuId + คำตอบจาก LINE
+- **`getUserRole` trim ค่า** — space ตัวเดียวจากการแก้ชีตด้วยมือเคยทำให้สิทธิ์หายเงียบๆ
+- **`registerUserWithDefaultRole()`** — ถ้า userId ตรงกับ `OWNER_LINE_ID` ลงทะเบียนเป็น "เจ้าของ" ไม่ใช่ "Customer"
+- **Feature สลับ role**: `TestSwitch.gs` เขียนใหม่ — `testAsOwner/Admin/Worker/Customer()` อัปเดตทั้งชีตและเมนูจริง ใช้ `OWNER_LINE_ID` จาก Script Properties (ไม่ hardcode userId เหมือนเดิม)
+
+### Automated test suite (ใหม่)
+`outputs/gasmock.js` + `qa.js` + `qa2.js` — mock GAS runtime (SpreadsheetApp/CacheService/UrlFetchApp/LockService/HtmlService) แล้วโหลดไฟล์ `.gs` จริงเข้าไปรัน **89 เคสผ่านหมด** ครอบ role/สิทธิ์, rich menu, doGet routing, หน้าต้นไม้, lock, error log, webhook security, ทุก flow ของบอท, session/OAuth
+> อยู่ใน scratchpad ของ agent ไม่ได้อยู่ในโปรเจกต์ — ถ้าอยากเก็บถาวรต้องย้ายเข้า repo เอง
+
+## จุดที่ค้างไว้ตามคำขอผู้ใช้ (ยังไม่ต้องทำ)
+**flow ตัดขายต้องเปลี่ยนเป็น 1 ลูก/1 รายการ** — ปัจจุบันกรอกเป็นยอดรวม (จำนวน+น้ำหนัก+ราคารวม) แต่ความจริงหน้างานต้องบันทึกทีละลูก หรือขายเป็นล็อตในอนาคต ผู้ใช้บอกว่า **"ขอดูหน้างานจริงก่อน ค้างไว้ก่อน"** — อย่าเพิ่งลงมือ รอผู้ใช้กลับมาบอกรูปแบบที่ต้องการ
 
 ## What's next
-1. Confirm the user has deployed and tested the photo-carousel-arrows change (Apps Script editor → Deploy → Manage deployments → New version → Deploy → open a tree with multiple photos in the Dashboard).
-2. **Clean up temporary debug code** added while diagnosing the OAuth login (see "Context" below) — this is currently live in production and should be removed/simplified now that root causes are understood:
-   - `gas/Code.gs` `doGet()`: currently calls `debugConsumeOAuthState`, `debugExchangeLineOAuthCode`, `debugLoginWithLineIdToken` and appends `[debug: ...]` detail to user-facing error messages.
-   - `gas/SheetOperations.gs`: `consumeOAuthState`/`exchangeLineOAuthCode`/`loginWithLineIdToken` are now thin wrappers around their `debug*` counterparts — fine to keep the wrappers, but `doGet` should go back to calling the plain (non-debug) versions and drop the `[debug: ...]` message suffixes.
-3. Once cleanup + carousel are confirmed, do the **final commit + push to GitHub** — the user's stated intent for closing out this whole body of work ("ทดสอบผ่านหมดแล้วบอกได้เลย จะ commit ทั้งหมด (รวมงานก่อนหน้า) push ขึ้น GitHub ปิดงานเป็นชุดสุดท้าย"). Nothing has been pushed since the pre-fix backup commit — all of the above work only exists in the user's local OneDrive-mounted `gas/` folder and in the live Apps Script deployment.
-4. Not yet actioned (offered, not requested): extend `OWNER_LINE_ID` / the pending-approval push notification to support multiple comma-separated LINE IDs.
-5. Deferred, lower priority, from the original `scrutinize` report (WARNING/NITPICK level, not committed to): no `LockService` locking around ID generation/approval (race condition risk), dead `generateAllQRCodes()` function, deprecated `chart.googleapis.com` QR generation endpoint.
+0. **ผู้ใช้ยังไม่ได้ deploy รอบล่าสุด** — เริ่มจากยืนยันว่าวางไฟล์ครบทั้ง 6 ไฟล์แล้วหรือยัง (`Code.gs`, `SheetOperations.gs`, `LineAPI.gs`, `TestSwitch.gs`, `Dashboard.js.html`, `TreeInfo.html`) แล้ว Deploy → New version
+1. **ผู้ใช้ deploy + ทดสอบตาม `docs/QA_CHECKLIST.md`** (สร้างใหม่ในรอบนี้) — ที่ยังไม่ยืนยัน: รูปในหน้าต้นไม้, ปุ่มเปิดแชท (`target="_top"` จะรอดหรือไม่), flow ตัดจำหน่ายจนจบ, race condition 2 คนพร้อมกัน
+2. **รัน `resyncAllRichMenus()` หนึ่งครั้ง** เพื่อซ่อมเมนูให้ทุกคนตาม role ปัจจุบัน (ยังไม่ยืนยันว่ารันแล้ว)
+3. ~~commit + push GitHub~~ — **เสร็จแล้ว** push ครบทุกอย่างในรอบนี้ รวม `docs/QA_CHECKLIST.md`, `gas/TreeInfo.html` และ README ที่อัปเดตแล้ว
+4. เปลี่ยน `PROXY_SECRET` — ค่าปัจจุบันเป็นคำที่เดาง่าย เป็นสิ่งเดียวที่กัน request ปลอมข้าม Cloudflare Worker (ต้องแก้ทั้ง Script Property และ Worker ให้ตรงกัน)
+5. ยังไม่ทำ (เสนอแล้ว ไม่ได้ขอ): dashboard session ย้ายจาก CacheService ไปเป็น signed token แบบเดียวกับ OAuth state, ลบ rich menu ซ้ำ 2 คู่ที่เกิดจากรัน `setupRichMenus()` สองรอบ
 
-## Key decisions made
-- **Cloudflare Worker scoped to the webhook only**, no custom domain — user explicitly did not want the Worker fronting the whole web app, and wanted to stay on the free `workers.dev` subdomain.
-- **Plain LINE Login OAuth2 (Option C) chosen over extending the Cloudflare Worker with a login page (Option A) or a separate static host (Option B)** — zero new infrastructure, stays entirely inside GAS, matches the user's preference for simplicity. Trade-off accepted: no more "auto-login because already inside the LINE app" convenience; user sees LINE's own confirm screen each time the session expires.
-- **State/CSRF check redesigned to be stateless (HMAC-signed timestamp)** rather than debugging `CacheService`'s cross-execution reliability further — eliminates the dependency entirely regardless of root cause.
-- **`CHANNEL_SECRET` and `LOGIN_CHANNEL_SECRET` must stay separate** — they belong to two different LINE channels (Messaging API vs. LINE Login) under the same provider. Do not consolidate them.
+## Key decisions made (session นี้)
+- **หน้าข้อมูลต้นไม้ไม่ใช้ LIFF เลย** — server-rendered ล้วน เพราะ LIFF ใน GAS iframe พังตั้งแต่ session ก่อน สแกนด้วยกล้องอะไรก็เปิดได้ ทุก role ใช้ได้
+- **แยกสิทธิ์ที่ server ไม่ใช่ที่หน้าเว็บ** — ปุ่มบันทึกในหน้าต้นไม้แสดงให้ทุกคน แต่ `doPost` เช็ค role อยู่แล้ว ลูกค้ากดก็ได้แค่ข้อมูลต้นไม้
+- **แปลง Drive URL ที่ฝั่ง server** (`toDriveImageUrl` ใน SheetOperations.gs) ไม่ใช่ฝั่ง client — เพื่อให้เขียน automated test ครอบได้
+- **lock ครอบ gen-รหัส + เข้าคิว เป็นก้อนเดียว** ไม่ใช่ lock แยกทีละฟังก์ชัน เพราะช่องว่างระหว่างสองฟังก์ชันคือจุดที่ race เกิด
 
-## Files changed or created
-- `gas/Code.gs` — `doGet()` rewritten to detect `?code=&state=` (OAuth callback) vs `?page=` vs default scanner page; runs state verification, code-exchange, login/session creation server-side before rendering `Dashboard.html`; templates `sessionToken`/`loginError`/`loginUrl` (as JSON-safe `*Json` variants) into the page. Role checks added to `APPROVE`/`REJECT_START`/`APPROVAL_LIST`.
-- `gas/SheetOperations.gs` — `isOwnerOrAdmin`, `changeActiveSeasonWeb` (Script Properties + auto-close prior season), `verifyLineIdToken`, `createDashboardSession`/`resolveDashboardSession` (CacheService-based session tokens, 6h TTL — unrelated to the OAuth-state bug, works fine), `loginWithLineIdToken` (renamed from `loginWithLiffWeb`) + `debugLoginWithLineIdToken`, `generateOAuthState`/`consumeOAuthState` (HMAC-based) + `debugConsumeOAuthState`, `signOAuthTimestamp`, `getDashboardChannelId`, `buildLineLoginUrl`, `exchangeLineOAuthCode` + `debugExchangeLineOAuthCode` (uses `LOGIN_CHANNEL_SECRET`), `getDashboardRedirectUri`. All `*Web` functions take a `sessionToken` param instead of a raw `userId`.
-- `gas/LineAPI.gs` — `getConfig(key)` reads Script Properties instead of the Config sheet.
-- `gas/Dashboard.js.html` — `AuthVM` rewritten (no LIFF SDK; reads `SERVER_SESSION_TOKEN`/`SERVER_LOGIN_ERROR`/`LINE_LOGIN_URL` templated globals; `goToLineLogin()` does a plain top-level redirect); `UtilsVM.escapeHtml()` added; `viewTree()` updated for the photo-arrows feature; new `scrollTreePhotos(direction)` added to `DashboardVM` and exported.
-- `gas/Dashboard.html` — login screen markup replaced (LINE Login button, no PIN); LIFF SDK `<script>` tag removed; templated JS vars added; tree-detail photo gallery wrapped in a `relative` div with new `#detailPhotoPrev`/`#detailPhotoNext` buttons; removed dead `#detailPhotoPreview`/`#detailNoPhoto` placeholder elements.
-- `cloudflare-worker/index.js`, `wrangler.toml`, `README.md` (new) — the signature-verifying Worker, deployed by the user.
-- New Script Properties added: `PROXY_SECRET`, `LOGIN_CHANNEL_SECRET` (in addition to the pre-existing ones migrated from the Config sheet).
+## Files changed (session นี้)
+- `gas/Code.gs` — doGet route `?tree=`; WAIT_PHOTO ย้ายเป็นสาขาระดับบน; `withScriptLock` ครอบ CONFIRM; `logErrorToSheet`; `registerUserWithDefaultRole`; `ensureRichMenuMatchesRole`
+- `gas/SheetOperations.gs` — `RICH_MENU_IDS`, `withScriptLock`, `logErrorToSheet`, `getTreePublicInfo`, `toDriveImageUrl`, `registerUserWithDefaultRole`, `ensureRichMenuMatchesRole`; `getUserRole` trim; `registerUser` lock; `updateUserRoleWeb` validate role
+- `gas/LineAPI.gs` — `linkRichMenuToUser` ไม่กลืน error แล้ว; `replyMessage` log ลง Error Log
+- `gas/TestSwitch.gs` — เขียนใหม่ทั้งไฟล์: สลับ role 4 แบบ + `listRichMenus`, `diagnoseRichMenuLink`, `diagnoseUserRows`, `checkMyRichMenu`, `resyncAllRichMenus`
+- `gas/Dashboard.js.html` — `UsersVM.changeRole` แก้บั๊ก + confirm
+- `gas/TreeInfo.html` — **ไฟล์ใหม่** หน้าข้อมูลต้นไม้ (ต้องสร้างเป็นไฟล์ HTML ชื่อ `TreeInfo` ใน editor)
+- `docs/QA_CHECKLIST.md` — **ไฟล์ใหม่** checklist ทดสอบด้วยมือ
+- Script Property ใหม่: `BOT_BASIC_ID` (Basic ID ของ OA จาก **Messaging API channel** ไม่ใช่ LINE Login channel)
+- ชีตใหม่: **"Error Log"** (เวลา / แหล่งที่มา / ข้อความ / รายละเอียด) — ชื่อต้องตรงเป๊ะ
 
 ## Context the next agent needs
-- **Never ask the user for actual secret values** (`CHANNEL_SECRET`, `LOGIN_CHANNEL_SECRET`, `PROXY_SECRET`, etc.) — these are entered directly by the user into GAS Script Properties / the Cloudflare Worker, never shared in chat.
-- **GAS `doPost(e)`/`doGet(e)` cannot read HTTP headers at all** (confirmed Google platform limitation) — this is why the Cloudflare Worker proxy exists.
-- **GAS web app content is always served inside Google's own sandboxed content iframe** on a dynamically-generated `*-script.googleusercontent.com` origin, different from the `script.google.com` URL shown in the address bar. This breaks anything doing same-origin/endpoint-URL validation from inside the page — this is why LIFF could never work reliably here, and why an earlier "break out of the iframe" attempt also failed (`window.location.href` from inside that sandbox points to the wrong, internal URL, not the public page).
-- **The Apps Script "Executions" log** (left sidebar, clock icon) was the key diagnostic tool throughout — always check it (shows deployment version, function, status, duration) before theorizing further about a live bug.
-- **Every code change needs an explicit new deployment**: Deploy → Manage deployments → Edit (pencil icon) → New version → Deploy. Saving the file alone does NOT update the live `/exec` URL — this caused confusion multiple times during this session.
-- **The user copies file contents manually into the Apps Script web editor** (not clasp/git-synced) — after any local edit, tell them exactly which file(s) to paste in.
-- The user's working folder is OneDrive-synced; git operations from a sandboxed/agent environment against this path can fail with `EPERM` (FUSE filesystem limitation). If git is needed again, either work in a real local filesystem or have the user run the git commands themselves.
-- `LIFF_ID` format is `"{channelId}-{randomString}"` — `getDashboardChannelId()` derives the channel ID via `.split('-')[0]`. This is the **LINE Login channel's** ID, not the Messaging API channel's.
-- User preferences (established across this whole engagement): concise, direct responses, Thai-primary with English technical terms where natural, step-by-step instructions for anything requiring manual action, and edit files directly rather than showing diffs first.
+> ข้อ 1-8 สืบทอดจาก session ก่อน ยังใช้ได้ทั้งหมด
+
+1. **ห้ามถามค่า secret จริงจากผู้ใช้** (`CHANNEL_SECRET`, `LOGIN_CHANNEL_SECRET`, `PROXY_SECRET`)
+2. **GAS `doPost`/`doGet` อ่าน HTTP header ไม่ได้เลย** — เหตุผลที่มี Cloudflare Worker proxy
+3. **หน้าเว็บ GAS ถูก serve ใน iframe เสมอ** บน origin `*-script.googleusercontent.com` ที่ต่างจาก URL ในแถบที่อยู่ — ทำให้ LIFF ใช้ไม่ได้ และเคยลอง "หลุด iframe" ด้วย `window.location.href` แล้วไม่สำเร็จ **(รอบนี้ลองใหม่ด้วย `target="_top"` ซึ่งเป็น browser-level navigation ไม่ต้องอ่าน URL — ยังไม่ยืนยันผล มีปุ่มคัดลอกเป็นทางสำรองแล้ว)**
+4. **Executions log** (ไอคอนนาฬิกา แถบซ้าย) คือเครื่องมือวินิจฉัยหลัก — เช็คก่อนตั้งสมมติฐานเสมอ
+5. **ทุกการแก้โค้ดต้อง Deploy → Manage deployments → ✏️ → New version → Deploy** แค่บันทึกไฟล์ไม่พอ
+6. **ผู้ใช้ copy ไฟล์เข้า Apps Script editor เอง** (ไม่ได้ใช้ clasp) — ต้องบอกชัดว่าไฟล์ไหนบ้าง
+7. โฟลเดอร์ผู้ใช้ sync กับ OneDrive — git จาก sandbox อาจล้มด้วย `EPERM`
+8. `LIFF_ID` = `"{channelId}-{randomString}"` โดย channelId เป็นของ **LINE Login channel** ส่วน `BOT_BASIC_ID` เป็นของ **Messaging API channel** คนละตัวกัน
+9. **บทเรียนสำคัญจากรอบนี้**: บั๊ก "เจ้าของกลายเป็นลูกค้า" เสียเวลาไป 3 สมมติฐานเพราะทุกครั้งตั้งอยู่บนสมมติฐานว่า "มีอะไรพัง" ทั้งที่ความจริงคือ **ไม่มีอะไรพังเลย — แค่ไม่มีใครเรียกฟังก์ชัน** ถ้าเจอบั๊กแนว "ค่าถูกในฐานข้อมูลแต่พฤติกรรมผิด" ให้ `grep` หาว่า **ใครเรียกฟังก์ชันที่ทำให้เกิดผลนั้นบ้าง** ก่อนจะเดาว่ามันทำงานล้มเหลว
+10. **ยิง API ภายนอกทุกจุดต้องใส่ `muteHttpExceptions: true` แล้ว log ผลลัพธ์** — โค้ดที่ throw แล้วถูก catch กลืนคือที่มาของบั๊กที่หายากที่สุดในโปรเจกต์นี้
+11. Preferences ผู้ใช้: ตอบกระชับตรงประเด็น ภาษาไทยเป็นหลักผสมศัพท์เทคนิคอังกฤษ, step-by-step สำหรับงานที่ต้องทำมือ, แก้ไฟล์ตรงๆ ไม่ต้องโชว์ diff ก่อน
 
 ## How to resume
-Ask the user whether they've deployed and tested the tree-detail photo-carousel-arrows change. If confirmed working, clean up the temporary OAuth debug diagnostics in `gas/Code.gs`/`gas/SheetOperations.gs` (see "What's next" #2), then help the user run the final `git add -A && git commit && git push` of all accumulated changes to `https://github.com/bornja55/Durain.git` to close out this security-hardening effort.
+ถามผู้ใช้ว่า deploy 6 ไฟล์ (`Code.gs`, `SheetOperations.gs`, `LineAPI.gs`, `TestSwitch.gs`, `Dashboard.js.html`, `TreeInfo.html`) แล้วทดสอบตาม `docs/QA_CHECKLIST.md` ถึงข้อไหน โดยเฉพาะ 2 บั๊กล่าสุด (รูปในหน้าต้นไม้ขึ้นหรือยัง / ปุ่มเปิดแชทค้างอีกไหม — ถ้ายังค้าง ให้ถามว่าปุ่ม "คัดลอกคำสั่ง" ใช้ได้ไหม เพื่อแยกว่าเป็นข้อจำกัด WebView หรือแก้ได้อีก) เมื่อผ่านหมดแล้วช่วยผู้ใช้ commit + push ขึ้น `https://github.com/bornja55/Durain.git`

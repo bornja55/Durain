@@ -39,11 +39,7 @@ function replyMessage(replyToken, messages) {
   
   const response = UrlFetchApp.fetch(url, options);
   if (response.getResponseCode() !== 200) {
-    try {
-      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
-      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), 'Reply Error', response.getContentText()]);
-    } catch(e) {}
+    logErrorToSheet('replyMessage', 'Reply Error', response.getContentText());
   }
 }
 
@@ -127,15 +123,26 @@ function getContent(messageId) {
 function linkRichMenuToUser(userId, richMenuId) {
   const url = `https://api.line.me/v2/bot/user/${userId}/richmenu/${richMenuId}`;
   const token = getConfig('CHANNEL_ACCESS_TOKEN');
-  
+
   const options = {
     method: 'post',
     headers: {
       'Authorization': 'Bearer ' + token
-    }
+    },
+    muteHttpExceptions: true
   };
 
-  UrlFetchApp.fetch(url, options);
+  const response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() !== 200) {
+    // เดิมไม่มี muteHttpExceptions -> throw แล้วถูก catch กลืนใน syncUserRichMenu
+    // เห็นแค่ใน console ที่ไม่มีใครเปิดดู ผู้ใช้เลยตกไปใช้ Default menu
+    // (= เมนูลูกค้า) แบบไม่มีใครรู้ ตอนนี้บันทึกลงชีต Error Log ให้เห็นชัด
+    logErrorToSheet('linkRichMenuToUser',
+      'ผูก Rich Menu ไม่สำเร็จ (HTTP ' + response.getResponseCode() + ')',
+      'userId=' + userId + ' richMenuId=' + richMenuId + ' | ' + response.getContentText());
+    return false;
+  }
+  return true;
 }
 
 /**

@@ -48,11 +48,7 @@ function doPost(e) {
 
     return HtmlService.createHtmlOutput("OK");
   } catch (err) {
-    try {
-      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
-      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), err.toString(), err.stack]);
-    } catch (e2) {}
+    logErrorToSheet('doPost', err.toString(), err.stack);
     return HtmlService.createHtmlOutput("Error");
   }
 }
@@ -63,6 +59,7 @@ function doGet(e) {
     let oauthCode = null;
     let oauthState = null;
     let oauthDenied = false;
+    let treeId = null;
 
     if (e && e.parameter) {
       if (e.parameter.code) {
@@ -76,13 +73,46 @@ function doGet(e) {
       } else if (e.parameter.error) {
         page = 'dashboard';
         oauthDenied = true;
+      } else if (e.parameter.tree) {
+        // QR บนแท็กต้นไม้ชี้มาที่ ?tree=X (ผ่าน liff.line.me หรือ /exec ตรงๆ)
+        // เสิร์ฟหน้าข้อมูลต้นไม้แบบ server-rendered ไม่ใช้ LIFF SDK เลย
+        // (LIFF init ใน GAS iframe ค้างตลอด - ข้อจำกัดเดียวกับที่เลิกใช้ LIFF login)
+        page = 'tree';
+        treeId = e.parameter.tree;
       } else if (e.parameter.page) {
         page = e.parameter.page;
       } else if (e.parameter['liff.state']) {
         const stateStr = decodeURIComponent(e.parameter['liff.state']);
         if (stateStr.indexOf('page=dashboard') !== -1) {
           page = 'dashboard';
+        } else {
+          // liff.line.me/{LIFF_ID}?tree=X มาถึงที่นี่เป็น liff.state="?tree=X"
+          const treeMatch = stateStr.match(/[?&]tree=([^&]+)/);
+          if (treeMatch) {
+            page = 'tree';
+            treeId = decodeURIComponent(treeMatch[1]);
+          }
         }
+      }
+    }
+
+    // OAuth callback: ถ้า state บอกว่ามาจากหน้าต้นไม้ ให้กลับไปหน้านั้นพร้อม
+    // session ที่เพิ่งได้ ไม่ใช่เด้งเข้า Dashboard (คนสวนไม่มีสิทธิ์ Dashboard อยู่แล้ว)
+    let treeSessionToken = '';
+    let treeLoginError = '';
+    if (oauthCode) {
+      const stateResult = consumeOAuthState(oauthState);
+      if (stateResult.valid && stateResult.returnTo.indexOf('tree:') === 0) {
+        page = 'tree';
+        treeId = stateResult.returnTo.substring(5);
+        const idToken = exchangeLineOAuthCode(oauthCode, getDashboardRedirectUri());
+        const verified = idToken ? verifyLineIdToken(idToken) : null;
+        if (verified && verified.sub) {
+          treeSessionToken = createDashboardSession(verified.sub);
+        } else {
+          treeLoginError = 'ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่';
+        }
+        oauthCode = null; // จัดการเสร็จแล้ว อย่าให้ตกไปเข้า flow ของ Dashboard
       }
     }
 
@@ -96,7 +126,7 @@ function doGet(e) {
     const redirectUri = getDashboardRedirectUri();
 
     if (oauthCode) {
-      if (!consumeOAuthState(oauthState)) {
+      if (!consumeOAuthState(oauthState).valid) {
         template.loginError = 'เซสชันเข้าสู่ระบบหมดอายุหรือไม่ถูกต้อง กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง';
       } else {
         const idToken = exchangeLineOAuthCode(oauthCode, redirectUri);
@@ -126,6 +156,30 @@ function doGet(e) {
       .setTitle('ระบบจัดการสวนทุเรียน')
       .addMetaTag('viewport', 'width=device-width, initial-scale=1')
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } else if (page === 'tree') {
+    // หน้าข้อมูลต้นไม้ (server-rendered, ไม่มี LIFF) - ปลายทางของ QR บนแท็ก
+    // ปุ่มบันทึกจะโชว์ก็ต่อเมื่อ server ยืนยัน role แล้วว่าเป็นคนสวน/เจ้าของ/admin
+    // ผู้ที่ยังไม่ login (รวมลูกค้าทุกคน) เห็นแค่ข้อมูลต้นไม้
+    const template = HtmlService.createTemplateFromFile('TreeInfo');
+    const info = getTreePublicInfo(treeId);
+    const myRole = treeSessionToken ? getMyRoleWeb(treeSessionToken) : null;
+    const canRecord = canRecordFromScan(myRole);
+
+    const safeJson = function (v) { return JSON.stringify(v).replace(/</g, '\\u003c'); };
+    // .replace กัน "</script>" หลุดจากข้อมูลในชีตมาปิด tag ในหน้า (XSS hardening)
+    template.infoJson = safeJson(info); // null ถ้าไม่พบ -> หน้าแสดง "ไม่พบต้นไม้"
+    template.historyJson = safeJson(info ? getTreeHistoryPublic(treeId) : []);
+    template.treeIdJson = safeJson(String(treeId || ''));
+    template.botBasicIdJson = safeJson(canRecord ? (getConfig('BOT_BASIC_ID') || '') : '');
+    template.sessionTokenJson = safeJson(treeSessionToken || '');
+    template.myRoleJson = safeJson(myRole || '');
+    template.canRecordJson = safeJson(!!canRecord);
+    template.loginErrorJson = safeJson(treeLoginError || '');
+    template.loginUrlJson = safeJson(buildLineLoginUrl(getDashboardRedirectUri(), 'tree:' + treeId) || '');
+    return template.evaluate()
+      .setTitle('ข้อมูลต้นทุเรียน ' + (info ? info.id : ''))
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   } else {
     // Default to LIFF Scanner
     const template = HtmlService.createTemplateFromFile('LIFF/index');
@@ -136,11 +190,7 @@ function doGet(e) {
       .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
   }
   } catch (err) {
-    try {
-      const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
-      const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Config');
-      sheet.appendRow(['ERROR_LOG', new Date().toLocaleString(), err.toString(), err.stack]);
-    } catch (e2) {}
+    logErrorToSheet('doGet', err.toString(), err.stack);
     return HtmlService.createHtmlOutput("Error: " + err.toString());
   }
 }
@@ -151,12 +201,11 @@ function handleFollow(event) {
   
   let role = getUserRole(userId);
   if (!role) {
-    role = 'Customer';
-    registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
+    role = registerUserWithDefaultRole(userId, profile.displayName, profile.pictureUrl);
+  } else {
+    // ผูก Rich Menu ตาม Role (ป้องกันการเขียนทับเมนูของผู้ใช้เดิม)
+    syncUserRichMenu(userId, role);
   }
-  
-  // ผูก Rich Menu ตาม Role (ป้องกันการเขียนทับเมนูของผู้ใช้เดิม)
-  syncUserRichMenu(userId, role);
   
   replyMessage(event.replyToken, {
     type: 'text',
@@ -173,10 +222,11 @@ function handlePostback(event) {
   if (!role) {
     try {
       const profile = getProfile(userId);
-      role = 'Customer';
-      registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
-      syncUserRichMenu(userId, role);
+      role = registerUserWithDefaultRole(userId, profile.displayName, profile.pictureUrl);
     } catch(e) {}
+  } else {
+    // เมนูตามทัน role ที่ถูกแก้ด้วยมือในชีต (ยิง API เฉพาะตอนไม่ตรงจริงๆ)
+    ensureRichMenuMatchesRole(userId, role);
   }
   
   // Custom parser since URLSearchParams is not fully supported in all GAS environments
@@ -267,13 +317,20 @@ function handlePostback(event) {
     else if (type === 'production') queueType = 'บันทึกผลผลิต';
     else if (type === 'register') {
       queueType = 'ลงทะเบียนต้นไม้';
-      // Generate ID right away so worker knows it!
-      const newTreeId = generateNextTreeId();
-      state.data.treeId = newTreeId;
     }
-    
+
     const photoUrlString = state.data.photoUrls ? state.data.photoUrls.join(',') : (state.data.photoUrl || '');
-    addToPendingQueue(queueType, state.data.treeId, state.data, userId, profile.displayName, photoUrlString);
+
+    // Script Lock ครอบตั้งแต่ gen รหัสต้นไม้ -> append ลงคิว ให้เป็นงานเดียว
+    // แยก lock ทีละฟังก์ชันไม่พอ: ช่องว่างระหว่าง generateNextTreeId() กับ
+    // addToPendingQueue() คือจุดที่สองคนกด CONFIRM พร้อมกันแล้วได้รหัสซ้ำ
+    withScriptLock(function () {
+      if (type === 'register') {
+        // Generate ID right away so worker knows it!
+        state.data.treeId = generateNextTreeId();
+      }
+      addToPendingQueue(queueType, state.data.treeId, state.data, userId, profile.displayName, photoUrlString);
+    });
     clearState(userId);
     
     if (type === 'register') {
@@ -365,9 +422,9 @@ function handleTextMessage(event) {
     let role = getUserRole(userId);
     if (!role) {
       const profile = getProfile(userId);
-      role = 'Customer';
-      registerUser(userId, profile.displayName || 'Unknown', role, profile.pictureUrl || '');
-      syncUserRichMenu(userId, role);
+      role = registerUserWithDefaultRole(userId, profile.displayName, profile.pictureUrl);
+    } else {
+      ensureRichMenuMatchesRole(userId, role);
     }
     // Default reply
     replyMessage(event.replyToken, {
@@ -377,6 +434,41 @@ function handleTextMessage(event) {
     return;
   }
   
+  // BUG FIX: บล็อกจัดการ "ข้าม"/"ส่งรูปครบแล้ว" เดิมถูกเขียนซ้อนอยู่ใน
+  // สาขา REGISTER_TREE ทั้งที่โค้ดข้างในเช็ค state.action === 'HARVEST'
+  // (เข้าไม่ถึงตลอดกาล) ผลคือ flow ตัดจำหน่าย/ผลเสียหาย พอกด "ส่งรูปครบแล้ว"
+  // แล้วบอทเงียบ ทำรายการไม่จบสักครั้ง ย้ายออกมาเป็นสาขาระดับบนที่ใช้ร่วมกัน
+  // ทั้งสอง flow
+  if (state.step === 'WAIT_PHOTO') {
+    const photoCount = state.data.photoUrls ? state.data.photoUrls.length : 0;
+
+    if (text === 'ข้าม') {
+      if (state.action === 'HARVEST') {
+        replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ห้ามข้าม กรุณาถ่ายรูปน้ำหนักตาชั่ง หรือรูปผลไม้ที่เสียหายทุกกรณีครับ'));
+        return;
+      }
+      replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
+      return;
+    }
+
+    if (text === 'ส่งรูปครบแล้ว') {
+      if (photoCount === 0 && state.action === 'HARVEST') {
+        replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ยังไม่ได้ส่งรูปเลยครับ กรุณาแนบรูปภาพก่อนกดส่งรูปครบแล้ว'));
+        return;
+      }
+      if (state.action === 'HARVEST') {
+        replyMessage(event.replyToken, buildHarvestSummaryFlex(state.data));
+      } else if (state.action === 'REGISTER_TREE') {
+        replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
+      }
+      return;
+    }
+
+    // พิมพ์อย่างอื่นระหว่างรอรูป: บอกให้ชัดว่าระบบรออะไรอยู่ ดีกว่าเงียบ
+    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาส่งรูปภาพ 📸 แล้วกด "ส่งรูปครบแล้ว" เมื่อส่งครบ (หรือพิมพ์ "ยกเลิก" เพื่อเริ่มใหม่)'));
+    return;
+  }
+
   if (state.action === 'HARVEST') {
     if (state.step === 'WAIT_QUANTITY') {
       state.data.quantity = parseInt(text, 10);
@@ -431,29 +523,6 @@ function handleTextMessage(event) {
       state.step = 'WAIT_LOCATION';
       setState(userId, state);
       replyMessage(event.replyToken, buildLocationRequestFlex());
-    }
-    else if (state.step === 'WAIT_PHOTO') {
-      if (text === 'ข้าม') {
-        if (state.action === 'HARVEST') {
-          replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ห้ามข้าม กรุณาถ่ายรูปน้ำหนักตาชั่ง หรือรูปผลไม้ที่เสียหายทุกกรณีครับ'));
-          return;
-        }
-        replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
-      } 
-      else if (text === 'ส่งรูปครบแล้ว') {
-        const photoCount = state.data.photoUrls ? state.data.photoUrls.length : 0;
-        
-        if (photoCount === 0 && state.action === 'HARVEST') {
-          replyMessage(event.replyToken, buildTextPromptFlex('⚠️ ยังไม่ได้ส่งรูปเลยครับ กรุณาแนบรูปภาพก่อนกดส่งรูปครบแล้ว'));
-          return;
-        }
-        
-        if (state.action === 'HARVEST') {
-          replyMessage(event.replyToken, buildHarvestSummaryFlex(state.data));
-        } else if (state.action === 'REGISTER_TREE') {
-          replyMessage(event.replyToken, buildTreeRegistrationSummaryFlex(state.data));
-        }
-      }
     }
   }
   else if (state.action === 'REJECT' && state.step === 'WAIT_REASON') {

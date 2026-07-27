@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ข้อมูลต้นทุเรียน</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+Thai:wght@400;500;600;700&display=swap"
+    rel="stylesheet" />
+  <style>
+    :root {
+      --primary: #7CB342;
+      --secondary: #F9A825;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      font-family: 'Noto Sans Thai', sans-serif;
+      background: #F5F5F5;
+      color: #1C1B1F;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .header {
+      width: 100%;
+      background: var(--primary);
+      color: #fff;
+      text-align: center;
+      padding: 16px;
+      font-weight: 700;
+      font-size: 18px;
+    }
+
+    .card {
+      background: #fff;
+      border-radius: 16px;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+      width: calc(100% - 32px);
+      max-width: 420px;
+      margin: 16px;
+      overflow: hidden;
+    }
+
+    .photo {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      display: block;
+      background: #E7E0EC;
+    }
+
+    /* แกลเลอรีเลื่อนแนวนอน (snap ทีละรูป) */
+    .gallery-wrap {
+      position: relative;
+      background: #E7E0EC;
+    }
+
+    .gallery {
+      display: flex;
+      overflow-x: auto;
+      scroll-snap-type: x mandatory;
+      scrollbar-width: none;
+    }
+
+    .gallery::-webkit-scrollbar {
+      display: none;
+    }
+
+    .gallery img {
+      width: 100%;
+      height: 220px;
+      object-fit: cover;
+      flex: 0 0 100%;
+      scroll-snap-align: center;
+      cursor: pointer;
+    }
+
+    .nav-btn {
+      position: absolute;
+      top: 50%;
+      transform: translateY(-50%);
+      width: 36px;
+      height: 36px;
+      border: none;
+      border-radius: 999px;
+      background: rgba(0, 0, 0, 0.45);
+      color: #fff;
+      font-size: 20px;
+      line-height: 1;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .nav-prev { left: 8px; }
+    .nav-next { right: 8px; }
+
+    .counter {
+      position: absolute;
+      bottom: 8px;
+      right: 12px;
+      background: rgba(0, 0, 0, 0.55);
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      padding: 3px 10px;
+      border-radius: 999px;
+    }
+
+    /* Lightbox ดูรูปใหญ่ */
+    .lightbox {
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.92);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      z-index: 100;
+    }
+
+    .lightbox.open { display: flex; }
+
+    .lightbox img {
+      max-width: 100%;
+      max-height: 85vh;
+      object-fit: contain;
+    }
+
+    .lightbox .close {
+      position: absolute;
+      top: 12px;
+      right: 16px;
+      background: none;
+      border: none;
+      color: #fff;
+      font-size: 34px;
+      line-height: 1;
+      cursor: pointer;
+    }
+
+    .lightbox .counter {
+      bottom: 20px;
+      right: 50%;
+      transform: translateX(50%);
+    }
+
+    .body {
+      padding: 20px;
+    }
+
+    .tree-id {
+      font-size: 22px;
+      font-weight: 700;
+      color: var(--primary);
+      margin-bottom: 12px;
+    }
+
+    .row {
+      display: flex;
+      justify-content: space-between;
+      padding: 10px 0;
+      border-bottom: 1px solid #eee;
+      font-size: 15px;
+    }
+
+    .row:last-child {
+      border-bottom: none;
+    }
+
+    .row .label {
+      color: #79747E;
+    }
+
+    .row .value {
+      font-weight: 600;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #E8F5E9;
+      color: #2E7D32;
+      border-radius: 999px;
+      padding: 2px 12px;
+      font-size: 13px;
+      font-weight: 600;
+    }
+
+    .actions {
+      padding: 0 20px 20px;
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .actions .hint {
+      font-size: 12px;
+      color: #79747E;
+      text-align: center;
+    }
+
+    .btn {
+      display: block;
+      text-align: center;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 15px;
+      padding: 14px;
+      border-radius: 999px;
+      color: #fff;
+    }
+
+    .btn-harvest {
+      background: var(--secondary);
+    }
+
+    .btn-production {
+      background: var(--primary);
+    }
+
+    /* ประวัติต้นไม้ */
+    .history {
+      padding: 0 20px 20px;
+    }
+
+    .history h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 12px;
+      color: #1C1B1F;
+    }
+
+    .event {
+      display: flex;
+      gap: 12px;
+      padding: 10px 0;
+      border-bottom: 1px solid #f0f0f0;
+    }
+
+    .event:last-child { border-bottom: none; }
+
+    .event .dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      margin-top: 6px;
+      flex: 0 0 10px;
+      background: var(--primary);
+    }
+
+    .event.sale .dot { background: var(--secondary); }
+    .event.damage .dot { background: #B3261E; }
+
+    .event .detail { flex: 1; }
+
+    .event .title {
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .event .meta {
+      font-size: 12px;
+      color: #79747E;
+      margin-top: 2px;
+    }
+
+    .event .when {
+      font-size: 12px;
+      color: #79747E;
+      white-space: nowrap;
+    }
+
+    .empty-history {
+      font-size: 13px;
+      color: #79747E;
+      text-align: center;
+      padding: 12px 0;
+    }
+
+    .btn-link {
+      background: none;
+      border: 1px solid #ddd;
+      border-radius: 999px;
+      padding: 12px;
+      font-family: inherit;
+      font-size: 14px;
+      font-weight: 600;
+      color: #49454F;
+      cursor: pointer;
+      width: 100%;
+    }
+
+    .error-card {
+      text-align: center;
+      padding: 40px 20px;
+    }
+
+    .error-card .icon {
+      font-size: 48px;
+      margin-bottom: 12px;
+    }
+  </style>
+</head>
+
+<body>
+  <div class="header">🌳 บ้านสวนโพรงกระต่าย</div>
+
+  <div class="card" id="card">
+    <div class="error-card">
+      <div class="icon">⏳</div>
+      <div>กำลังโหลด...</div>
+    </div>
+  </div>
+
+  <div class="lightbox" id="lightbox">
+    <button type="button" class="close" aria-label="ปิด">&times;</button>
+    <button type="button" class="nav-btn nav-prev" aria-label="รูปก่อนหน้า">‹</button>
+    <img id="lightboxImg" alt="รูปต้นไม้ขนาดใหญ่">
+    <button type="button" class="nav-btn nav-next" aria-label="รูปถัดไป">›</button>
+    <div class="counter" id="lightboxCounter"></div>
+  </div>
+
+  <script>
+    // ข้อมูลถูก render จาก server (doGet) - ไม่มีการเรียก LIFF SDK ใดๆ
+    var INFO = <?!= infoJson ?>;
+    var HISTORY = <?!= historyJson ?>; // ไม่มีข้อมูลราคา/รายได้ — ดูได้ที่ Dashboard เท่านั้น
+    var TREE_ID = <?!= treeIdJson ?>;
+    // BOT_BASIC_ID จะเป็นค่าว่างถ้า server ยังไม่ยืนยันสิทธิ์ — ปุ่มบันทึกจึงถูกซ่อน
+    var BOT_BASIC_ID = <?!= botBasicIdJson ?>;
+    var SESSION_TOKEN = <?!= sessionTokenJson ?>;
+    var MY_ROLE = <?!= myRoleJson ?>;       // '' = ยังไม่ได้ login
+    var CAN_RECORD = <?!= canRecordJson ?>; // server เป็นคนตัดสิน ไม่ใช่หน้าเว็บ
+    var LOGIN_ERROR = <?!= loginErrorJson ?>;
+    var LOGIN_URL = <?!= loginUrlJson ?>;
+
+    // จำ session ไว้ 6 ชม. เท่าอายุจริงฝั่ง server คนสวนจะได้ไม่ต้อง login ซ้ำ
+    // ทุกครั้งที่สแกนต้นใหม่ (GAS iframe บางเครื่องบล็อก storage -> ถอยไปใช้
+    // แบบ login ทุกครั้ง ไม่ให้หน้าพัง)
+    var TOKEN_KEY = 'durian_session';
+    function saveToken(tok) {
+      try { localStorage.setItem(TOKEN_KEY, JSON.stringify({ t: tok, exp: Date.now() + 21600000 })); } catch (e) { }
+    }
+    function loadToken() {
+      try {
+        var raw = localStorage.getItem(TOKEN_KEY);
+        if (!raw) return '';
+        var o = JSON.parse(raw);
+        if (!o.exp || o.exp < Date.now()) { localStorage.removeItem(TOKEN_KEY); return ''; }
+        return o.t || '';
+      } catch (e) { return ''; }
+    }
+
+    function esc(s) {
+      return String(s).replace(/[&<>"']/g, function (c) {
+        return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+      });
+    }
+
+    function scanCommand(flow) {
+      return 'SCAN:' + flow + ':' + INFO.id;
+    }
+
+    function oaLink(flow) {
+      // เปิดแชท LINE OA พร้อมข้อความ SCAN:flow:treeId ให้ผู้ใช้กดส่ง
+      // ฝั่ง server (doPost) เช็ค role อยู่แล้ว: ลูกค้าส่งไปก็ได้แค่ข้อมูลต้นไม้
+      var basicId = BOT_BASIC_ID.charAt(0) === '@' ? BOT_BASIC_ID : '@' + BOT_BASIC_ID;
+      return 'https://line.me/R/oaMessage/' + encodeURIComponent(basicId) + '/?' +
+        encodeURIComponent(scanCommand(flow));
+    }
+
+    // สำรอง: ก๊อปคำสั่งไปวางในแชทเอง เผื่อ deep link ถูกบล็อกบนบางเครื่อง
+    function copyCommand(flow, btn) {
+      var text = scanCommand(flow);
+      var done = function () {
+        var old = btn.textContent;
+        btn.textContent = '✅ คัดลอกแล้ว — ไปวางในแชทบอท';
+        setTimeout(function () { btn.textContent = old; }, 2500);
+      };
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done, function () { prompt('คัดลอกข้อความนี้ไปวางในแชทบอท:', text); });
+      } else {
+        prompt('คัดลอกข้อความนี้ไปวางในแชทบอท:', text);
+      }
+    }
+
+    // ---------- ประวัติต้นไม้ ----------
+    var HISTORY_PAGE = 10;
+
+    function renderHistory(card) {
+      var box = document.createElement('div');
+      box.className = 'history';
+      card.appendChild(box);
+
+      var shown = HISTORY_PAGE;
+
+      function eventClass(type) {
+        if (type === 'ตัดขาย') return 'event sale';
+        if (type === 'ผลเสียหาย') return 'event damage';
+        return 'event';
+      }
+
+      function eventHtml(e) {
+        // meta: จำนวน/เกรด/น้ำหนัก เท่านั้น — ไม่มีราคา
+        var bits = [];
+        if (e.quantity) bits.push(e.quantity + ' ลูก');
+        if (e.grade) bits.push('เกรด ' + e.grade);
+        if (e.weight) bits.push(e.weight + ' กก.');
+        if (e.season) bits.push('ฤดูกาล ' + e.season);
+
+        return '<div class="' + eventClass(e.type) + '">' +
+          '<div class="dot"></div>' +
+          '<div class="detail">' +
+          '<div class="title">' + esc(e.type) + '</div>' +
+          (bits.length ? '<div class="meta">' + esc(bits.join(' · ')) + '</div>' : '') +
+          '</div>' +
+          '<div class="when">' + esc(e.date) + '</div>' +
+          '</div>';
+      }
+
+      function draw() {
+        var head = '<h3>📋 ประวัติต้นไม้</h3>';
+
+        if (!HISTORY.length) {
+          box.innerHTML = head + '<div class="empty-history">ยังไม่มีประวัติการบันทึกสำหรับต้นนี้</div>';
+          return;
+        }
+
+        var list = HISTORY.slice(0, shown).map(eventHtml).join('');
+        var more = HISTORY.length > shown
+          ? '<button type="button" class="btn-link" id="moreHistory" style="margin-top:12px">' +
+            'ดูทั้งหมด (อีก ' + (HISTORY.length - shown) + ' รายการ)</button>'
+          : '';
+        box.innerHTML = head + list + more;
+
+        var btn = document.getElementById('moreHistory');
+        if (btn) btn.addEventListener('click', function () { shown = HISTORY.length; draw(); });
+      }
+
+      draw();
+    }
+
+    // ---------- ส่วนปุ่มบันทึก (แสดงตามสิทธิ์) ----------
+    function renderActions(card) {
+      var actions = document.createElement('div');
+      actions.className = 'actions';
+      card.appendChild(actions);
+
+      // 1) server ยืนยันสิทธิ์แล้ว -> แสดงปุ่มบันทึก
+      if (CAN_RECORD && BOT_BASIC_ID) {
+        // target="_top" สำคัญมาก: หน้า GAS ถูก serve อยู่ใน iframe เสมอ ถ้าไม่ใส่
+        // ลิงก์จะ navigate ภายใน iframe แล้ว LINE จะบล็อกการเปิดแอป (ค้างที่หน้า
+        // "โปรดเปิด LINE") — บังคับให้เปลี่ยนหน้าต่างบนสุดแทน deep link จึงทำงาน
+        actions.innerHTML =
+          '<div class="hint">เข้าสู่ระบบเป็น: ' + esc(MY_ROLE) + '</div>' +
+          '<a class="btn btn-harvest" target="_top" rel="noopener" href="' + oaLink('harvest') + '">✂️ บันทึกตัดจำหน่าย</a>' +
+          '<a class="btn btn-production" target="_top" rel="noopener" href="' + oaLink('production') + '">📊 บันทึกผลผลิต</a>' +
+          '<button type="button" class="btn-link" data-copy="harvest">📋 คัดลอกคำสั่งตัดจำหน่าย</button>' +
+          '<button type="button" class="btn-link" data-copy="production">📋 คัดลอกคำสั่งบันทึกผลผลิต</button>' +
+          '<div class="hint">ถ้าปุ่มด้านบนไม่เปิดแชท ให้กดคัดลอกแล้วไปวางในแชทบอทเอง</div>';
+        actions.querySelectorAll('[data-copy]').forEach(function (b) {
+          b.addEventListener('click', function () { copyCommand(b.getAttribute('data-copy'), b); });
+        });
+        return;
+      }
+
+      // 2) login แล้วแต่ไม่มีสิทธิ์ (= ลูกค้า) -> ไม่ต้องบอกอะไรเลย
+      if (MY_ROLE) return;
+
+      // 3) ยังไม่ได้ login -> ลิงก์เล็กๆ สำหรับเจ้าหน้าที่เท่านั้น
+      //    ลูกค้าทั่วไปที่แค่สแกนดูข้อมูล จะไม่เห็นปุ่มบันทึกใดๆ
+      actions.innerHTML =
+        (LOGIN_ERROR ? '<div class="hint" style="color:#B3261E">' + esc(LOGIN_ERROR) + '</div>' : '') +
+        '<button type="button" class="btn-link" id="staffLogin">🔑 เจ้าหน้าที่สวน — เข้าสู่ระบบเพื่อบันทึกข้อมูล</button>';
+
+      var btn = document.getElementById('staffLogin');
+      if (btn) {
+        btn.addEventListener('click', function () {
+          btn.disabled = true;
+          btn.textContent = 'กำลังตรวจสอบ...';
+          // ถ้าเคย login ไว้และ session ยังไม่หมดอายุ ใช้ต่อได้เลย ไม่ต้องเด้ง LINE
+          var saved = loadToken();
+          if (saved) {
+            google.script.run
+              .withSuccessHandler(function (role) {
+                if (role && (role === 'คนสวน' || role === 'เจ้าของ' || role === 'admin')) {
+                  MY_ROLE = role; CAN_RECORD = true; SESSION_TOKEN = saved;
+                  location.reload();
+                } else {
+                  goLogin();
+                }
+              })
+              .withFailureHandler(goLogin)
+              .getMyRoleWeb(saved);
+          } else {
+            goLogin();
+          }
+        });
+      }
+
+      function goLogin() {
+        if (!LOGIN_URL) { alert('ระบบเข้าสู่ระบบยังไม่พร้อมใช้งาน'); return; }
+        top.location.href = LOGIN_URL; // ต้อง top-level ไม่งั้นถูกบล็อกใน iframe
+      }
+    }
+
+    // ---------- แกลเลอรี + lightbox ----------
+    function setupGallery(photos) {
+      var gallery = document.getElementById('gallery');
+      var counter = document.getElementById('galleryCounter');
+
+      function currentIndex() {
+        return Math.round(gallery.scrollLeft / gallery.clientWidth);
+      }
+      function updateCounter() {
+        if (counter) counter.textContent = (currentIndex() + 1) + ' / ' + photos.length;
+      }
+
+      gallery.addEventListener('scroll', updateCounter);
+
+      // ปุ่มเลื่อนซ้าย/ขวา
+      document.querySelectorAll('[data-nav]').forEach(function (btn) {
+        btn.addEventListener('click', function () {
+          var next = currentIndex() + Number(btn.getAttribute('data-nav'));
+          next = Math.max(0, Math.min(photos.length - 1, next));
+          gallery.scrollTo({ left: next * gallery.clientWidth, behavior: 'smooth' });
+        });
+      });
+
+      // แตะรูปเพื่อดูขนาดใหญ่
+      gallery.querySelectorAll('img').forEach(function (img) {
+        img.addEventListener('click', function () {
+          openLightbox(photos, Number(img.getAttribute('data-idx')));
+        });
+      });
+    }
+
+    function openLightbox(photos, startIndex) {
+      var idx = startIndex;
+      var box = document.getElementById('lightbox');
+      var img = document.getElementById('lightboxImg');
+      var counter = document.getElementById('lightboxCounter');
+
+      function show() {
+        img.src = photos[idx].full;
+        counter.textContent = (idx + 1) + ' / ' + photos.length;
+        counter.style.display = photos.length > 1 ? 'block' : 'none';
+        box.querySelectorAll('.nav-btn').forEach(function (b) {
+          b.style.display = photos.length > 1 ? 'flex' : 'none';
+        });
+      }
+      function move(step) {
+        idx = (idx + step + photos.length) % photos.length; // วนรอบ
+        show();
+      }
+
+      box.onclick = function (e) {
+        // แตะพื้นหลัง (ไม่ใช่รูป/ปุ่ม) เพื่อปิด
+        if (e.target === box) closeLightbox();
+      };
+      box.querySelector('.close').onclick = closeLightbox;
+      box.querySelector('.nav-prev').onclick = function (e) { e.stopPropagation(); move(-1); };
+      box.querySelector('.nav-next').onclick = function (e) { e.stopPropagation(); move(1); };
+      document.addEventListener('keydown', onKey);
+
+      function onKey(e) {
+        if (e.key === 'Escape') closeLightbox();
+        else if (e.key === 'ArrowLeft') move(-1);
+        else if (e.key === 'ArrowRight') move(1);
+      }
+      function closeLightbox() {
+        box.classList.remove('open');
+        document.body.style.overflow = '';
+        document.removeEventListener('keydown', onKey);
+      }
+
+      show();
+      box.classList.add('open');
+      document.body.style.overflow = 'hidden'; // กันหน้าหลังเลื่อนตาม
+    }
+
+    (function render() {
+      var card = document.getElementById('card');
+
+      // เพิ่ง login สำเร็จ -> จำ session ไว้ใช้ตอนสแกนต้นถัดไป
+      if (SESSION_TOKEN) saveToken(SESSION_TOKEN);
+
+      if (!INFO) {
+        card.innerHTML =
+          '<div class="error-card">' +
+          '<div class="icon">❌</div>' +
+          '<div style="font-weight:700; margin-bottom:8px;">ไม่พบต้นไม้รหัส ' + esc(TREE_ID) + '</div>' +
+          '<div style="color:#79747E; font-size:14px;">QR Code นี้อาจยังไม่ได้ลงทะเบียนในระบบ</div>' +
+          '</div>';
+        return;
+      }
+
+      var photos = INFO.photos || (INFO.photoUrl ? [{ thumb: INFO.photoUrl, full: INFO.photoUrl }] : []);
+
+      var html = '';
+      if (photos.length) {
+        html += '<div class="gallery-wrap">' +
+          '<div class="gallery" id="gallery">' +
+          photos.map(function (p, i) {
+            return '<img src="' + esc(p.thumb) + '" alt="รูปต้นไม้ ' + (i + 1) + '" data-idx="' + i + '">';
+          }).join('') +
+          '</div>' +
+          (photos.length > 1
+            ? '<button type="button" class="nav-btn nav-prev" data-nav="-1" aria-label="รูปก่อนหน้า">‹</button>' +
+              '<button type="button" class="nav-btn nav-next" data-nav="1" aria-label="รูปถัดไป">›</button>' +
+              '<div class="counter" id="galleryCounter">1 / ' + photos.length + '</div>'
+            : '') +
+          '</div>';
+      }
+      html +=
+        '<div class="body">' +
+        '<div class="tree-id">🌳 ' + esc(INFO.id) + '</div>' +
+        '<div class="row"><span class="label">สายพันธุ์</span><span class="value">' + esc(INFO.variety) + '</span></div>' +
+        '<div class="row"><span class="label">อายุต้น</span><span class="value">' + esc(INFO.age) + ' ปี</span></div>' +
+        '<div class="row"><span class="label">สถานะ</span><span class="value"><span class="badge">' + esc(INFO.status) + '</span></span></div>' +
+        '<div class="row"><span class="label">ผลคงเหลือ (ฤดูกาลนี้)</span><span class="value">' + esc(INFO.remaining) + ' ลูก</span></div>' +
+        '</div>';
+      card.innerHTML = html;
+
+      if (photos.length) setupGallery(photos);
+
+      renderHistory(card);
+      renderActions(card);
+    })();
+  </script>
+</body>
+
+</html>

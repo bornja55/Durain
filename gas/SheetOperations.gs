@@ -44,6 +44,37 @@ function getSpreadsheet() {
   return SheetRepository.getSpreadsheet();
 }
 
+/**
+ * ครอบงานที่ "อ่านค่าล่าสุด -> append แถวใหม่" ด้วย Script Lock กัน race
+ * condition ตอนสองคนกดพร้อมกัน (เช่นรหัสต้นไม้ซ้ำ) รอ lock สูงสุด 10 วิ
+ * (LINE webhook ต้องตอบใน ~30 วิ จึงไม่ตั้งนานกว่านี้) ถ้ารอไม่ทันจะ throw
+ * ไปเข้า error handler ปกติ ดีกว่าปล่อยให้ข้อมูลซ้ำแบบเงียบๆ
+ * หมายเหตุ: lock ไม่ reentrant - ห้ามเรียก withScriptLock ซ้อนกันเอง
+ */
+function withScriptLock(fn) {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(10000);
+  try {
+    return fn();
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * เขียน error ลงชีต "Error Log" (แทนที่เดิมที่เขียนลงชีต Config ซึ่งถูก
+ * migrate ไป Script Properties แล้ว) — ที่เดียว ใช้ร่วมกันทุกไฟล์
+ * คอลัมน์: เวลา | แหล่งที่มา | ข้อความ error | รายละเอียด/stack
+ */
+function logErrorToSheet(source, message, detail) {
+  try {
+    const spreadsheetId = PropertiesService.getScriptProperties().getProperty('SPREADSHEET_ID');
+    const sheet = SpreadsheetApp.openById(spreadsheetId).getSheetByName('Error Log');
+    if (!sheet) return; // ไม่มีชีตก็ไม่ให้ log พังซ้ำ
+    sheet.appendRow([new Date(), source, String(message || ''), String(detail || '')]);
+  } catch (e2) { /* อย่าให้การ log ทำ handler หลักพัง */ }
+}
+
 function getTreeInfo(treeId) {
   const sheet = SheetRepository.getSheet('ต้นไม้');
   const data = sheet.getDataRange().getValues();
@@ -63,6 +94,114 @@ function getTreeInfo(treeId) {
 
 function getActiveSeason() {
   return getConfig('ACTIVE_SEASON');
+}
+
+/**
+ * ข้อมูลต้นไม้สำหรับหน้าเว็บสาธารณะ (TreeInfo.html) ที่เปิดจากการสแกน QR
+ * บนแท็กต้นไม้ — ไม่ต้อง login จึงให้เฉพาะข้อมูลที่เปิดเผยได้
+ * คอลัมน์ชีต "ต้นไม้": 0:ID 1:สายพันธุ์ 2:อายุ 3:Lat 4:Lng 5:เดือนดอก 6:สถานะ 10:รูป
+ */
+function getTreePublicInfo(treeId) {
+  const sheet = SheetRepository.getSheet('ต้นไม้');
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][0]) === String(treeId)) {
+      // คอลัมน์รูปเก็บหลายรูปคั่นด้วย comma — ส่งไปทั้งหมด ไม่ใช่แค่รูปแรก
+      // แต่ละรูปมี 2 ขนาด: thumb สำหรับแกลเลอรี, full สำหรับ popup ดูรูปใหญ่
+      const photoRaw = String(data[i][10] || '');
+      const photos = photoRaw
+        .split(',')
+        .map(function (u) { return u.trim(); })
+        .filter(function (u) { return u !== ''; })
+        .map(function (u) {
+          return { thumb: toDriveImageUrl(u, 800), full: toDriveImageUrl(u, 1600) };
+        });
+
+      return {
+        id: String(data[i][0]),
+        variety: String(data[i][1] || '-'),
+        age: String(data[i][2] || '-'),
+        status: String(data[i][6] || '-'),
+        photos: photos,
+        photoUrl: photos.length ? photos[0].thumb : '', // รูปแรก (เผื่อโค้ดเก่าที่ยังอ้างถึง)
+        remaining: Number(getRemainingFruits(getActiveSeason(), data[i][0])) || 0
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * ประวัติของต้นไม้สำหรับหน้า TreeInfo (เปิดสาธารณะจากการสแกน QR)
+ * **ไม่มีข้อมูลราคา/รายได้เด็ดขาด** — ดูได้ที่ Dashboard ซึ่งต้อง login เท่านั้น
+ * คอลัมน์ชีต "การเก็บเกี่ยว": 0:ID 1:ฤดูกาล 2:ต้นไม้ 3:จำนวน 4:เหตุผล
+ * 5:เกรด 6:น้ำหนัก 7:ราคา(ข้าม) 11:วันที่ 12:วันอนุมัติ
+ * เรียงใหม่สุดขึ้นก่อน รวมรายการ "ลงทะเบียนต้น" เป็นเหตุการณ์แรกสุดด้วย
+ */
+function getTreeHistoryPublic(treeId) {
+  const events = [];
+  const fmt = function (d) {
+    const dt = new Date(d);
+    return isNaN(dt) ? '' : Utilities.formatDate(dt, 'Asia/Bangkok', 'dd/MM/yyyy');
+  };
+
+  const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  if (harvestSheet) {
+    const data = harvestSheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][2]).trim() !== String(treeId).trim()) continue;
+      const when = data[i][11] || data[i][12];
+      events.push({
+        date: fmt(when),
+        sortKey: new Date(when).getTime() || 0,
+        season: String(data[i][1] || ''),
+        type: String(data[i][4] || 'เก็บเกี่ยว'), // ตัดขาย / ผลเสียหาย
+        quantity: Number(data[i][3]) || 0,
+        grade: String(data[i][5] || ''),
+        weight: Number(data[i][6]) || 0
+      });
+    }
+  }
+
+  // เหตุการณ์ลงทะเบียนต้น (คอลัมน์ I ของชีต ต้นไม้)
+  const treeSheet = SheetRepository.getSheet('ต้นไม้');
+  if (treeSheet) {
+    const td = treeSheet.getDataRange().getValues();
+    for (let i = 1; i < td.length; i++) {
+      if (String(td[i][0]).trim() === String(treeId).trim() && td[i][8]) {
+        events.push({
+          date: fmt(td[i][8]),
+          sortKey: new Date(td[i][8]).getTime() || 0,
+          season: '',
+          type: 'ลงทะเบียนต้นไม้',
+          quantity: 0,
+          grade: '',
+          weight: 0
+        });
+        break;
+      }
+    }
+  }
+
+  events.sort(function (a, b) { return b.sortKey - a.sortKey; }); // ใหม่สุดก่อน
+  return events.map(function (e) {
+    delete e.sortKey; // ไม่ต้องส่ง key ภายในไปหน้าเว็บ
+    return e;
+  });
+}
+
+/**
+ * แปลง URL ของ Drive ให้เป็นลิงก์รูปที่ <img src> โหลดได้จริง
+ * savePhotoToDrive() เก็บค่าจาก file.getUrl() ซึ่งเป็น "หน้า viewer"
+ * (https://drive.google.com/file/d/{id}/view) ไม่ใช่ไฟล์รูป — ใส่ใน <img>
+ * แล้วจะไม่ขึ้น ต้องแปลงเป็น endpoint thumbnail ก่อน
+ * (ตรรกะเดียวกับ UtilsVM.getDriveImageUrl() ใน Dashboard.js.html)
+ */
+function toDriveImageUrl(url, width) {
+  if (!url) return '';
+  let match = url.match(/\/d\/([a-zA-Z0-9_-]+)/);
+  if (!match) match = url.match(/[?&]id=([a-zA-Z0-9_-]+)/);
+  return match ? 'https://drive.google.com/thumbnail?id=' + match[1] + '&sz=w' + (width || 800) : url;
 }
 
 function getProductionForTree(seasonId, treeId) {
@@ -406,20 +545,28 @@ function getDashboardYearComparison() {
 }
 
 function registerUser(userId, displayName, role, pictureUrl = '') {
-  const sheet = SheetRepository.getSheet('ผู้ใช้');
-  const data = sheet.getDataRange().getValues();
-  for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === userId) return false; // exists
-  }
-  sheet.appendRow([userId, displayName, role, pictureUrl]);
-  return true;
+  // Script Lock ครอบทั้ง เช็คซ้ำ -> append: กัน follow + postback มาพร้อมกัน
+  // แล้วได้ user ซ้ำ 2 แถว
+  return withScriptLock(function () {
+    const sheet = SheetRepository.getSheet('ผู้ใช้');
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]).trim() === String(userId).trim()) return false; // exists
+    }
+    sheet.appendRow([userId, displayName, role, pictureUrl]);
+    return true;
+  });
 }
 
 function getUserRole(userId) {
   const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for (let i = 1; i < data.length; i++) {
-    if (data[i][0] === userId) return data[i][2];
+    // trim ทั้งสองฝั่ง: กัน userId/role ที่ถูกแก้มือในชีตแล้วติด space
+    // (space ตัวเดียวทำให้ isOwnerOrAdmin fail เงียบๆ = สิทธิ์หายทั้ง flow)
+    if (String(data[i][0]).trim() === String(userId).trim()) {
+      return String(data[i][2] || '').trim() || null;
+    }
   }
   return null;
 }
@@ -526,20 +673,54 @@ function resolveDashboardSession(sessionToken) {
  * lived on LINE's side, so replay of the whole login isn't possible either
  * way - state's job here is purely proving origin, not replay defense.
  */
-function generateOAuthState() {
-  const ts = Date.now().toString();
-  return ts + '.' + signOAuthTimestamp(ts);
+/**
+ * `returnTo` (ไม่บังคับ) คือหน้าที่ต้องพากลับหลัง login เสร็จ เช่น
+ * 'tree:T-001' — ถูกเซ็นรวมอยู่ใน HMAC ด้วย จึงปลอมไม่ได้ ใช้ให้คนสวนที่
+ * สแกน QR แล้วกด login กลับมาที่หน้าต้นไม้เดิม ไม่ใช่เด้งไป Dashboard
+ */
+function generateOAuthState(returnTo) {
+  const payload = Date.now().toString() + '~' + (returnTo || '');
+  return payload + '.' + signOAuthTimestamp(payload);
 }
 
+/**
+ * คืน { valid: boolean, returnTo: string } — เดิมคืน boolean เฉยๆ
+ * ผู้เรียกเดิมที่เช็คแบบ if (!consumeOAuthState(x)) ยังใช้ได้ เพราะ object
+ * เป็น truthy เสมอ จึงต้องอ่าน .valid ทุกที่ (แก้ที่ doGet แล้ว)
+ */
 function consumeOAuthState(state) {
-  if (!state) return false;
-  const parts = state.split('.');
-  if (parts.length !== 2) return false;
-  const ts = parts[0];
-  const sig = parts[1];
-  if (signOAuthTimestamp(ts) !== sig) return false;
+  const invalid = { valid: false, returnTo: '' };
+  if (!state) return invalid;
+
+  const dot = state.lastIndexOf('.');
+  if (dot === -1) return invalid;
+  const payload = state.substring(0, dot);
+  const sig = state.substring(dot + 1);
+  if (signOAuthTimestamp(payload) !== sig) return invalid;
+
+  const sep = payload.indexOf('~');
+  const ts = sep === -1 ? payload : payload.substring(0, sep);
+  const returnTo = sep === -1 ? '' : payload.substring(sep + 1);
+
   const age = Date.now() - Number(ts);
-  return !isNaN(age) && age >= 0 && age <= 600000; // valid for 10 minutes
+  if (isNaN(age) || age < 0 || age > 600000) return invalid; // อายุ 10 นาที
+  return { valid: true, returnTo: returnTo };
+}
+
+/**
+ * role ของ session ปัจจุบัน สำหรับหน้า TreeInfo ที่ต้องรู้ว่าคนเปิดเป็นใคร
+ * ก่อนตัดสินใจโชว์ปุ่มบันทึก — คืน null ถ้า session หมดอายุ/ไม่มี
+ * (ไม่ throw เพราะกรณี "ไม่ได้ login" เป็นเรื่องปกติของหน้านี้ ไม่ใช่ error)
+ */
+function getMyRoleWeb(sessionToken) {
+  const userId = resolveDashboardSession(sessionToken);
+  if (!userId) return null;
+  return getUserRole(userId);
+}
+
+/** role ที่ได้รับอนุญาตให้บันทึกข้อมูลผ่านการสแกน QR */
+function canRecordFromScan(role) {
+  return role === 'คนสวน' || isOwnerOrAdmin(role);
 }
 
 function signOAuthTimestamp(ts) {
@@ -563,14 +744,14 @@ function getDashboardChannelId() {
  * redirect_uri must exactly match what's registered as a callback URL for
  * this channel in the LINE Developers Console (LINE Login settings).
  */
-function buildLineLoginUrl(redirectUri) {
+function buildLineLoginUrl(redirectUri, returnTo) {
   const channelId = getDashboardChannelId();
   if (!channelId) return null;
   const params = {
     response_type: 'code',
     client_id: channelId,
     redirect_uri: redirectUri,
-    state: generateOAuthState(),
+    state: generateOAuthState(returnTo),
     scope: 'openid profile'
   };
   const query = Object.keys(params)
@@ -916,27 +1097,91 @@ function getUsersWeb(sessionToken) {
   return users;
 }
 
+// ==========================================
+// Rich Menu IDs — ที่เดียวในโปรเจกต์ (single source of truth)
+// เดิม admin ใช้ richmenu-e965ba... (เมนูรุ่นเก่าที่ถูกลบไปแล้ว) ทำให้
+// linkRichMenuToUser fail เงียบๆ และเจ้าของ fallback ไปเมนู Default
+// (= Customer Menu) จนดูเหมือน "เจ้าของกลายเป็นลูกค้า"
+// ตรวจสอบ ID จริงได้ด้วย listRichMenus() ใน TestSwitch.gs
+// ==========================================
+const RICH_MENU_IDS = {
+  admin: "richmenu-6aeef5cf6cfd36b6150d498c4cd7509e",    // Admin Menu (จาก finalizeAdminMenu)
+  worker: "richmenu-36623b6970c5491f16332221a8f5eaa2",   // Worker Menu
+  customer: "richmenu-275478d29a58253eacf727ca4e00d179"  // Customer Menu (ตั้งเป็น Default ด้วย)
+};
+
+/**
+ * ลงทะเบียนผู้ใช้ใหม่ + ผูกเมนู แต่กันเคส "เจ้าของถูกดาวน์เกรดเป็นลูกค้า":
+ * ถ้า userId ตรงกับ OWNER_LINE_ID ให้ตั้งเป็น 'เจ้าของ' ไม่ใช่ 'Customer'
+ * — เจ้าของที่ userId ในชีตไม่ตรง (เช่นย้าย channel) จะไม่ถูกลดสิทธิ์เงียบๆ อีก
+ * คืน role ที่ใช้จริง เพื่อให้ผู้เรียกใช้ค่านี้ต่อได้
+ */
+function registerUserWithDefaultRole(userId, displayName, pictureUrl) {
+  const ownerId = getConfig('OWNER_LINE_ID');
+  const isOwner = ownerId && String(ownerId).trim() === String(userId).trim();
+  const role = isOwner ? 'เจ้าของ' : 'Customer';
+
+  registerUser(userId, displayName || 'Unknown', role, pictureUrl || '');
+  syncUserRichMenu(userId, role);
+
+  if (isOwner) {
+    logErrorToSheet('registerUserWithDefaultRole',
+      'เจ้าของ (OWNER_LINE_ID) ไม่มีแถวในชีตผู้ใช้ จึงถูกลงทะเบียนใหม่เป็น "เจ้าของ"',
+      'userId=' + userId + ' — ตรวจว่ามีแถวเก่าที่ userId ไม่ตรงค้างอยู่หรือไม่ (รัน diagnoseUserRows)');
+  }
+  return role;
+}
+
+/**
+ * ROOT CAUSE FIX: syncUserRichMenu ถูกเรียกแค่ตอน add friend / สร้างผู้ใช้ใหม่ /
+ * แก้ role ผ่าน Dashboard — ถ้าแก้ role ด้วยมือในชีต เมนูบน LINE จะค้างอยู่ที่
+ * ค่าเดิมตลอดไป (เจ้าของที่เคยถูกตั้งเป็น Customer ตอน add friend จึงเห็นเมนู
+ * ลูกค้าไม่หาย แม้ชีตจะเขียนว่า "เจ้าของ" แล้ว)
+ *
+ * ฟังก์ชันนี้เรียกได้ทุก event โดยไม่เปลือง LINE API: จำ role ที่ผูกไปล่าสุด
+ * ไว้ใน CacheService ถ้าตรงกับ role ปัจจุบันก็ข้าม ยิง API เฉพาะตอนที่ต่างจริงๆ
+ * (cache หายก็แค่ยิงซ้ำหนึ่งครั้ง ไม่มีผลเสีย)
+ */
+function ensureRichMenuMatchesRole(userId, role) {
+  if (!userId || !role) return;
+  try {
+    const cache = CacheService.getScriptCache();
+    const key = 'menu_role_' + userId;
+    if (cache.get(key) === role) return; // ผูกตรงอยู่แล้ว ไม่ต้องยิง API
+    syncUserRichMenu(userId, role);
+    cache.put(key, role, 21600); // 6 ชม.
+  } catch (e) {
+    // การ sync เมนูล้มเหลวต้องไม่ทำให้ flow หลักของผู้ใช้พัง
+  }
+}
+
 function syncUserRichMenu(userId, role) {
   try {
     if (role === 'เจ้าของ' || role === 'admin') {
-      linkRichMenuToUser(userId, "richmenu-e965ba0fb0d93888408f7dd7cdf2b336");
+      linkRichMenuToUser(userId, RICH_MENU_IDS.admin);
     } else if (role === 'คนสวน') {
-      linkRichMenuToUser(userId, "richmenu-36623b6970c5491f16332221a8f5eaa2");
+      linkRichMenuToUser(userId, RICH_MENU_IDS.worker);
     } else if (role === 'Customer') {
-      linkRichMenuToUser(userId, "richmenu-275478d29a58253eacf727ca4e00d179");
+      linkRichMenuToUser(userId, RICH_MENU_IDS.customer);
     } else {
       // ไม่มี role หรืออื่นๆ ให้ใช้ Default (ซึ่งต้องตั้ง Default เป็น Customer Menu)
       unlinkRichMenuFromUser(userId);
     }
   } catch (err) {
-    console.error("Failed to sync rich menu for " + userId + ": " + err);
+    console.error("Failed to sync rich menu for " + userId + " (role=" + role + "): " + err);
   }
 }
 
 function updateUserRoleWeb(targetUserId, newRole, sessionToken) {
   const auth = checkUserAccessWeb(sessionToken);
-  if(!auth.hasAccess || auth.user.role !== 'เจ้าของ') throw new Error("Unauthorized. Only owner can change roles.");
-  
+  // admin แก้สิทธิ์ได้เท่าเจ้าของ (เดิมจำกัดเฉพาะ 'เจ้าของ' ซึ่งไม่สอดคล้องกับ
+  // ที่อื่นในระบบที่ admin อนุมัติ/ปฏิเสธได้ทุกอย่างผ่าน isOwnerOrAdmin)
+  if(!auth.hasAccess || !isOwnerOrAdmin(auth.user.role)) throw new Error("Unauthorized. เฉพาะเจ้าของหรือ admin เท่านั้นที่แก้สิทธิ์ได้");
+  if(['เจ้าของ', 'admin', 'คนสวน', 'Customer'].indexOf(newRole) === -1) throw new Error("Role ไม่ถูกต้อง: " + newRole);
+  // กันลดสิทธิ์ตัวเองจนล็อกตัวเองออกจากระบบ (UI disable dropdown ของตัวเองอยู่แล้ว
+  // แต่ server ต้องกันด้วย ไม่งั้นยิง request ตรงๆ ก็ยังทำได้)
+  if(String(targetUserId).trim() === String(auth.user.userId).trim()) throw new Error("ไม่สามารถแก้สิทธิ์ของตัวเองได้");
+
   const sheet = SheetRepository.getSheet('ผู้ใช้');
   const data = sheet.getDataRange().getValues();
   for(let i=1; i<data.length; i++){
