@@ -53,6 +53,13 @@ function doPost(e) {
   }
 }
 
+/**
+ * แท็บที่มีจริงในหน้า Dashboard (ตรงกับ id="tab-xxx" ใน Dashboard.html)
+ * ใช้เป็น whitelist ของ deep-link `?page=dashboard&tab=xxx`
+ * ถ้าเพิ่มแท็บใหม่ในหน้าเว็บ ต้องเพิ่มชื่อที่นี่ด้วย ไม่งั้น deep-link จะไม่ทำงาน
+ */
+const VALID_DASHBOARD_TABS = ['overview', 'map', 'pending', 'trees', 'income', 'users'];
+
 function doGet(e) {
   try {
     let page = 'scanner';
@@ -60,6 +67,7 @@ function doGet(e) {
     let oauthState = null;
     let oauthDenied = false;
     let treeId = null;
+    let requestedTab = '';
 
     if (e && e.parameter) {
       if (e.parameter.code) {
@@ -81,10 +89,14 @@ function doGet(e) {
         treeId = e.parameter.tree;
       } else if (e.parameter.page) {
         page = e.parameter.page;
+        requestedTab = e.parameter.tab || '';
       } else if (e.parameter['liff.state']) {
         const stateStr = decodeURIComponent(e.parameter['liff.state']);
         if (stateStr.indexOf('page=dashboard') !== -1) {
           page = 'dashboard';
+          // liff.state อาจพก tab มาด้วย เช่น "?page=dashboard&tab=income"
+          const tabMatch = stateStr.match(/[?&]tab=([^&]+)/);
+          if (tabMatch) requestedTab = decodeURIComponent(tabMatch[1]);
         } else {
           // liff.line.me/{LIFF_ID}?tree=X มาถึงที่นี่เป็น liff.state="?tree=X"
           const treeMatch = stateStr.match(/[?&]tree=([^&]+)/);
@@ -96,13 +108,18 @@ function doGet(e) {
       }
     }
 
-    // OAuth callback: ถ้า state บอกว่ามาจากหน้าต้นไม้ ให้กลับไปหน้านั้นพร้อม
-    // session ที่เพิ่งได้ ไม่ใช่เด้งเข้า Dashboard (คนสวนไม่มีสิทธิ์ Dashboard อยู่แล้ว)
+    // OAuth callback: อ่าน state "ครั้งเดียว" แล้วใช้ผลร่วมกันทุกสาขา
+    // (ถ้าเรียก consumeOAuthState ซ้ำไม่เป็นไรเพราะเป็น HMAC ไร้ storage
+    //  แต่ถ้าเผลอ exchangeLineOAuthCode ซ้ำจะพัง — code ใช้ได้ครั้งเดียว)
+    let stateResult = { valid: false, returnTo: '' };
+    if (oauthCode) stateResult = consumeOAuthState(oauthState);
+
+    // กลับไปหน้าที่ผู้ใช้กดมาก่อน login ไม่ใช่เด้งเข้าหน้าแรกเสมอ
     let treeSessionToken = '';
     let treeLoginError = '';
-    if (oauthCode) {
-      const stateResult = consumeOAuthState(oauthState);
-      if (stateResult.valid && stateResult.returnTo.indexOf('tree:') === 0) {
+    if (oauthCode && stateResult.valid) {
+      if (stateResult.returnTo.indexOf('tree:') === 0) {
+        // หน้าต้นไม้: จัดการ login เองตรงนี้ (คนสวนไม่มีสิทธิ์ Dashboard)
         page = 'tree';
         treeId = stateResult.returnTo.substring(5);
         const idToken = exchangeLineOAuthCode(oauthCode, getDashboardRedirectUri());
@@ -113,6 +130,11 @@ function doGet(e) {
           treeLoginError = 'ยืนยันตัวตนไม่สำเร็จ กรุณาลองใหม่';
         }
         oauthCode = null; // จัดการเสร็จแล้ว อย่าให้ตกไปเข้า flow ของ Dashboard
+      } else if (stateResult.returnTo.indexOf('dashboard:') === 0) {
+        // Dashboard: แค่จำแท็บไว้ แล้วปล่อยให้ flow login ปกติข้างล่างทำงานต่อ
+        // ถ้าไม่ทำ ผู้ใช้ที่กด "รายได้" ตอน session หมดจะตกที่แท็บแรกแทน
+        page = 'dashboard';
+        requestedTab = stateResult.returnTo.substring(10);
       }
     }
 
@@ -126,7 +148,7 @@ function doGet(e) {
     const redirectUri = getDashboardRedirectUri();
 
     if (oauthCode) {
-      if (!consumeOAuthState(oauthState).valid) {
+      if (!stateResult.valid) {
         template.loginError = 'เซสชันเข้าสู่ระบบหมดอายุหรือไม่ถูกต้อง กรุณาลองเข้าสู่ระบบใหม่อีกครั้ง';
       } else {
         const idToken = exchangeLineOAuthCode(oauthCode, redirectUri);
@@ -141,9 +163,14 @@ function doGet(e) {
       template.loginError = 'การเข้าสู่ระบบถูกยกเลิก';
     }
 
+    // whitelist ชื่อแท็บ: ค่าที่ไม่รู้จักให้ตกไป overview เสมอ
+    // ใช้ whitelist ไม่ใช่ blacklist เพราะค่านี้ถูกส่งเข้าไปในหน้าเว็บ
+    const initialTab = VALID_DASHBOARD_TABS.indexOf(requestedTab) !== -1 ? requestedTab : 'overview';
+
     // Fresh login link for the button - always generated so a failed
     // attempt above can be retried without a full page reload.
-    template.loginUrl = buildLineLoginUrl(redirectUri);
+    // พา returnTo ไปด้วยเพื่อให้ login เสร็จแล้วกลับมาแท็บเดิม ไม่ใช่แท็บแรก
+    template.loginUrl = buildLineLoginUrl(redirectUri, 'dashboard:' + initialTab);
 
     // JSON.stringify these before they hit the <?!= ?> (raw, unescaped)
     // scriptlets in Dashboard.html, so they come out as safe JS string
@@ -151,6 +178,7 @@ function doGet(e) {
     template.sessionTokenJson = JSON.stringify(template.sessionToken || '');
     template.loginErrorJson = JSON.stringify(template.loginError || '');
     template.loginUrlJson = JSON.stringify(template.loginUrl || '');
+    template.initialTabJson = JSON.stringify(initialTab);
 
     return template.evaluate()
       .setTitle('ระบบจัดการสวนทุเรียน')
@@ -277,15 +305,31 @@ function handlePostback(event) {
   
   if (action === 'HARVEST_REASON') {
     state.data.reason = params['reason'];
-    state.step = 'WAIT_QUANTITY';
-    setState(userId, state);
-    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์จำนวนที่เก็บเกี่ยว'));
+
+    if (state.data.reason === 'ตัดขาย') {
+      // FLOW ใหม่: ตัดทั้งต้น ลงตะกร้า ชั่งครั้งเดียว -> ถามน้ำหนัก+จำนวนลูก
+      // ในคำถามเดียว ไม่ถามเกรด/ราคาแล้ว เพราะตอนชั่งยังไม่รู้ (ต้องเทรวมกอง
+      // แล้วคัดเกรดขายอีกที) ดู docs/DESIGN_harvest_lot.md
+      state.step = 'WAIT_WEIGHT_COUNT';
+      setState(userId, state);
+      const roundTotal = getTreeRoundTotal(getHarvestRoundId(new Date()), state.data.treeId);
+      const already = roundTotal.entries > 0
+        ? `\n\n📊 ต้นนี้วันนี้บันทึกไปแล้ว ${roundTotal.entries} ตะกร้า รวม ${roundTotal.weight} กก. (ระบบจะบวกให้อัตโนมัติ)`
+        : '';
+      replyMessage(event.replyToken, buildTextPromptFlex(
+        'พิมพ์ น้ำหนัก และ จำนวนลูก คั่นด้วยช่องว่าง\n\nตัวอย่าง: 45 18\n(45 กก. 18 ลูก)' + already));
+    } else {
+      state.step = 'WAIT_QUANTITY';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์จำนวนลูกที่เสียหาย'));
+    }
   }
   else if (action === 'GRADE') {
-    state.data.grade = params['grade'];
-    state.step = 'WAIT_WEIGHT';
-    setState(userId, state);
-    replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์น้ำหนักรวม (กิโลกรัม)'));
+    // ขั้นตอนเลือกเกรดถูกยกเลิกแล้ว (ย้ายไปอยู่ตอนบันทึกการขายรายวัน)
+    // ปุ่มนี้อาจยังค้างอยู่ในแชทเก่า -> บอกให้เริ่มใหม่แทนที่จะเงียบ
+    clearState(userId);
+    replyMessage(event.replyToken, buildTextPromptFlex(
+      '⚠️ ระบบเปลี่ยนวิธีบันทึกใหม่แล้ว ไม่ต้องเลือกเกรดตอนตัดอีก\n\nกรุณาสแกน QR แล้วเริ่มรายการใหม่ครับ'));
   }
   else if (action === 'VARIETY') {
     const variety = params['variety'];
@@ -313,7 +357,11 @@ function handlePostback(event) {
     const profile = getProfile(userId);
     let queueType = '';
     
-    if (type === 'harvest') queueType = 'ตัดจำหน่าย';
+    if (type === 'harvest') {
+      queueType = 'ตัดจำหน่าย';
+      // ผูกรายการเข้ารอบของ "วันที่บันทึก" — 1 รอบ = 1 วัน ไม่ต้องเปิด/ปิดรอบเอง
+      state.data.roundId = getHarvestRoundId(new Date());
+    }
     else if (type === 'production') queueType = 'บันทึกผลผลิต';
     else if (type === 'register') {
       queueType = 'ลงทะเบียนต้นไม้';
@@ -381,19 +429,114 @@ function handlePostback(event) {
     }
     replyMessage(event.replyToken, buildApprovalCarouselFlex(items));
   }
+  else if (action === 'SALE_ROUND') {
+    // เจ้าของ/admin/คนสวน กรอกเกรด/น้ำหนัก/ราคาได้ทุกคนที่จุดเดียวนี้
+    // เจ้าของ/admin: บันทึกมีผลทันที (เหมือนเดิม)
+    // คนสวน (หรือ role อื่นที่ไม่ใช่ Customer): ส่งเข้าคิวรอเจ้าของอนุมัติก่อน
+    // ดู WAIT_BUYER ด้านล่างที่เป็นจุดแยก path จริง
+    if (role === 'Customer') {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
+    const isDirectSave = isOwnerOrAdmin(role);
+
+    // รองรับย้อนหลัง: days=1 คือเมื่อวาน (เผื่อขายดึกแล้วมาบันทึกเช้าวันรุ่งขึ้น)
+    const daysBack = parseInt(params['days'], 10) || 0;
+    const target = new Date();
+    target.setDate(target.getDate() - daysBack);
+    const roundId = getHarvestRoundId(target);
+    const summary = getHarvestRoundSummary(roundId);
+
+    if (summary.treeCount === 0) {
+      replyMessage(event.replyToken, buildErrorFlex(
+        'วันที่ ' + formatRoundIdAsDate(roundId) + ' ยังไม่มีรายการตัดขายที่อนุมัติแล้ว\n\nถ้าเพิ่งบันทึก ให้อนุมัติรายการก่อนครับ'));
+      return;
+    }
+
+    // ไม่ใช่เจ้าของ/admin และยังไม่ได้กด "แก้ไขรายการ" (params.edit) มา:
+    // เช็คก่อนว่ารอบนี้มีของที่ตัวเองส่งค้างไว้ไหม กันส่งซ้ำจนคิวบวม
+    // (1 รอบมีรายการค้างได้แค่ 1 รายการ แต่แก้ไขรายการเดิมได้เรื่อยๆ)
+    if (!isDirectSave && params['edit'] !== '1') {
+      const pending = findPendingSaleItem(roundId);
+      if (pending) {
+        replyMessage(event.replyToken, buildSalePendingExistsFlex(roundId, pending, daysBack));
+        return;
+      }
+    }
+
+    state.action = 'SALE_ROUND';
+    state.step = 'WAIT_GRADES';
+    state.data = { roundId: roundId, isDirectSave: isDirectSave };
+    setState(userId, state);
+    replyMessage(event.replyToken, buildSaleRoundPromptFlex(summary, getSaleRoundTotals(roundId)));
+  }
+  else if (action === 'SALE_CANCEL_PENDING') {
+    // คนสวนยกเลิกรายการขายที่ตัวเองส่งไปเอง ก่อนเจ้าของตัดสินใจ
+    if (role === 'Customer') {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
+    const result = cancelPendingItem(params['id'], userId);
+    if (result.success) {
+      clearState(userId);
+      replyMessage(event.replyToken, buildSuccessFlex('ยกเลิกรายการที่ส่งไปแล้วเรียบร้อย พิมพ์ "บันทึกการขาย" เพื่อเริ่มใหม่ได้เลยครับ'));
+    } else {
+      replyMessage(event.replyToken, buildErrorFlex(result.reason || 'ยกเลิกไม่สำเร็จ'));
+    }
+  }
+  else if (action === 'RETURN_START') {
+    // เจ้าของ/admin ขอให้คนสวนแก้ไขตัวเลขแล้วส่งใหม่ (ต่างจากปฏิเสธตรงที่แก้ไข-ส่งซ้ำได้)
+    if (!isOwnerOrAdmin(role)) {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
+    state.action = 'RETURN';
+    state.step = 'WAIT_RETURN_REASON';
+    state.data.itemId = params['id'];
+    setState(userId, state);
+    replyMessage(event.replyToken, buildTextPromptFlex('พิมพ์เหตุผลที่ให้แก้ไข (เช่น ราคาผิด/น้ำหนักไม่ตรง)\n\nระบบจะแจ้งคนที่ส่งมาให้แก้ไขและส่งใหม่ทันที'));
+  }
   else if (action === 'DASHBOARD') {
     replyMessage(event.replyToken, buildDashboardMenuFlex());
+  }
+  else if (action === 'MANAGE') {
+    // ประตูเข้าเว็บ Dashboard แยกตามแท็บ — เฉพาะคนที่เข้า Dashboard ได้
+    if (!isOwnerOrAdmin(role)) {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
+    replyMessage(event.replyToken, buildManageMenuFlex(getDashboardRedirectUri()));
   }
   else if (action === 'DASHBOARD_VIEW') {
     const viewType = params['type'];
     let dashData;
     let title;
     const seasonId = getActiveSeason();
-    if (viewType === 'variety') { dashData = getDashboardByVariety(seasonId); title = 'สรุปตามสายพันธุ์'; }
-    else if (viewType === 'grade') { dashData = getDashboardByGrade(seasonId); title = 'สรุปตามเกรด'; }
-    else { dashData = getDashboardTotal(seasonId); title = 'สรุปภาพรวม'; }
-    
-    replyMessage(event.replyToken, buildDashboardResultFlex(title, dashData));
+    let unit = '';
+    if (viewType === 'variety') {
+      dashData = getDashboardByVariety(seasonId); title = 'สรุปตามสายพันธุ์'; unit = 'ลูก';
+    } else if (viewType === 'grade') {
+      // หน่วยเป็นกิโลกรัม เพราะเกรดมาจากผลคัดจริงตอนขาย (ชั่ง ไม่ได้นับลูก)
+      dashData = getDashboardByGrade(seasonId); title = 'สรุปตามเกรด (จากการคัดขาย)'; unit = 'กก.';
+    } else {
+      dashData = getDashboardTotal(seasonId); title = 'สรุปภาพรวม'; // มีหน่วยติดมากับค่าแล้ว
+    }
+
+    replyMessage(event.replyToken, buildDashboardResultFlex(title, dashData, unit));
+  }
+  else if (action === 'SALE_CONFIRM') {
+    if (role === 'Customer') {
+      replyMessage(event.replyToken, buildErrorFlex('คุณไม่มีสิทธิ์ทำรายการนี้'));
+      return;
+    }
+    const st = getState(userId);
+    if (!st || st.action !== 'SALE_ROUND' || !st.data.grades) {
+      replyMessage(event.replyToken, buildErrorFlex('รายการหมดอายุแล้ว กรุณาเริ่มบันทึกการขายใหม่'));
+      return;
+    }
+    st.step = 'WAIT_BUYER';
+    setState(userId, st);
+    replyMessage(event.replyToken, buildTextPromptFlex('พิมพ์ชื่อผู้ซื้อ (ล้ง/พ่อค้า)\n\nถ้าไม่ระบุ พิมพ์ - หรือ ข้าม'));
   }
   else if (action === 'REGISTER_TREE') {
     state.action = 'REGISTER_TREE';
@@ -403,6 +546,24 @@ function handlePostback(event) {
     replyMessage(event.replyToken, buildVarietySelectionFlex());
   }
 }
+
+/**
+ * ข้อความที่พิมพ์แล้วทำงานเหมือนกดปุ่ม — ทางเข้าสำรองของ action ที่ไม่มีปุ่ม
+ * ใน Rich Menu (การเพิ่มปุ่ม Rich Menu ต้องทำรูปใหม่ทั้งใบ)
+ * ทุก action ที่ handle ควรมีทางเข้าอย่างน้อย 1 ทาง ไม่งั้นโค้ดตายอยู่เฉยๆ
+ */
+const TEXT_SHORTCUTS = {
+  'บันทึกการขาย': 'action=SALE_ROUND',
+  'บันทึกขาย': 'action=SALE_ROUND',
+  'ขาย': 'action=SALE_ROUND',
+  'บันทึกการขายเมื่อวาน': 'action=SALE_ROUND&days=1',
+  'รออนุมัติ': 'action=APPROVAL_LIST',
+  'ภาพรวม': 'action=DASHBOARD',
+  'รายงาน': 'action=DASHBOARD',
+  'ระบบจัดการ': 'action=MANAGE',
+  'จัดการ': 'action=MANAGE',
+  'ลงทะเบียนต้นไม้': 'action=REGISTER_TREE'
+};
 
 function handleTextMessage(event) {
   const userId = event.source.userId;
@@ -416,7 +577,7 @@ function handleTextMessage(event) {
   }
   
   const state = getState(userId);
-  
+
   if (!state) {
     // If user is not in a flow, ensure they are registered
     let role = getUserRole(userId);
@@ -426,10 +587,20 @@ function handleTextMessage(event) {
     } else {
       ensureRichMenuMatchesRole(userId, role);
     }
+
+    // ทางลัดด้วยการพิมพ์ — สำรองจากปุ่มในเมนู "ภาพรวม" เผื่อหาปุ่มไม่เจอ
+    // (แปลง text เป็น postback แล้วส่งเข้า handler เดิม ไม่ต้องเขียน logic ซ้ำ)
+    if (TEXT_SHORTCUTS[text]) {
+      event.postback = { data: TEXT_SHORTCUTS[text] };
+      handlePostback(event);
+      return;
+    }
+
     // Default reply
     replyMessage(event.replyToken, {
       type: 'text',
-      text: 'กรุณาเลือกทำรายการจากเมนูด้านล่างครับ 👇'
+      text: 'กรุณาเลือกทำรายการจากเมนูด้านล่างครับ 👇\n\n' +
+            'พิมพ์ "บันทึกการขาย" เพื่อบันทึกยอดขายของวันนี้'
     });
     return;
   }
@@ -470,33 +641,78 @@ function handleTextMessage(event) {
   }
 
   if (state.action === 'HARVEST') {
-    if (state.step === 'WAIT_QUANTITY') {
-      state.data.quantity = parseInt(text, 10);
-      if (isNaN(state.data.quantity)) {
-        replyMessage(event.replyToken, buildErrorFlex('กรุณาพิมพ์เป็นตัวเลขเท่านั้น'));
+    if (state.step === 'WAIT_WEIGHT_COUNT') {
+      // รับ "45 18" = 45 กก. 18 ลูก — คั่นด้วยช่องว่างหรือ comma ก็ได้
+      const parts = text.replace(/,/g, ' ').split(/\s+/).filter(function (s) { return s !== ''; });
+      const weight = parseFloat(parts[0]);
+      const count = parseInt(parts[1], 10);
+
+      if (parts.length < 2 || isNaN(weight) || isNaN(count)) {
+        replyMessage(event.replyToken, buildErrorFlex(
+          'กรุณาพิมพ์ 2 ตัวเลข คั่นด้วยช่องว่าง\n\nตัวอย่าง: 45 18\n(น้ำหนัก 45 กก. จำนวน 18 ลูก)'));
         return;
       }
-      if (state.data.reason === 'ตัดขาย') {
-        state.step = 'WAIT_GRADE';
-        setState(userId, state);
-        replyMessage(event.replyToken, buildGradeSelectionFlex());
-      } else {
-        state.step = 'WAIT_PHOTO';
-        setState(userId, state);
-        replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปผลไม้ที่เสียหาย 📸'));
+      if (weight <= 0 || count <= 0) {
+        replyMessage(event.replyToken, buildErrorFlex('น้ำหนักและจำนวนลูกต้องมากกว่า 0'));
+        return;
       }
-    }
-    else if (state.step === 'WAIT_WEIGHT') {
-      state.data.weight = parseFloat(text);
-      state.step = 'WAIT_PRICE';
-      setState(userId, state);
-      replyMessage(event.replyToken, buildTextPromptFlex('กรุณาพิมพ์ราคาต่อกิโลกรัม'));
-    }
-    else if (state.step === 'WAIT_PRICE') {
-      state.data.price = parseFloat(text);
+
+      state.data.weight = weight;
+      state.data.quantity = count;
       state.step = 'WAIT_PHOTO';
       setState(userId, state);
       replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปที่เห็นตาชั่งน้ำหนัก 📸'));
+    }
+    else if (state.step === 'WAIT_QUANTITY') {
+      // สายผลเสียหาย: ถามจำนวนลูกอย่างเดียว ไม่ต้องชั่ง
+      state.data.quantity = parseInt(text, 10);
+      if (isNaN(state.data.quantity) || state.data.quantity <= 0) {
+        replyMessage(event.replyToken, buildErrorFlex('กรุณาพิมพ์จำนวนลูกเป็นตัวเลขที่มากกว่า 0'));
+        return;
+      }
+      state.data.weight = 0;
+      state.step = 'WAIT_PHOTO';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildPhotoRequestFlex('กรุณาถ่ายรูปผลไม้ที่เสียหาย 📸'));
+    }
+  }
+  else if (state.action === 'SALE_ROUND') {
+    if (state.step === 'WAIT_GRADES') {
+      // รับหลายบรรทัด บรรทัดละ "เกรด น้ำหนัก ราคา" เช่น
+      //   A 60 130
+      //   B 40 90
+      // กรอกทีเดียวจบ เร็วกว่าเดินทีละขั้นทีละเกรด
+      const parsed = parseSaleGradeLines(text);
+      if (parsed.error) {
+        replyMessage(event.replyToken, buildErrorFlex(parsed.error));
+        return;
+      }
+      state.data.grades = parsed.grades;
+      state.step = 'WAIT_CONFIRM';
+      setState(userId, state);
+      replyMessage(event.replyToken, buildSaleRoundConfirmFlex(state.data.roundId, parsed.grades));
+      return;
+    }
+    if (state.step === 'WAIT_BUYER') {
+      state.data.buyer = (text === '-' || text === 'ข้าม') ? '' : text;
+      const profile = getProfile(userId);
+      const roundId = state.data.roundId;
+      const grades = state.data.grades;
+      const buyer = state.data.buyer;
+      const isDirectSave = state.data.isDirectSave;
+      clearState(userId);
+
+      if (isDirectSave) {
+        // เจ้าของ/admin — บันทึกมีผลทันทีเหมือนเดิม
+        const result = saveSaleRound(roundId, grades, buyer, profile.displayName);
+        replyMessage(event.replyToken, buildSaleRoundSavedFlex(roundId, result,
+          getHarvestRoundSummary(roundId)));
+      } else {
+        // คนสวน (หรือ role อื่น) — เข้าคิวรอเจ้าของอนุมัติก่อน ยังไม่บันทึกลง 'รอบขาย' จริง
+        upsertSalePendingItem(roundId, grades, buyer, userId, profile.displayName);
+        replyMessage(event.replyToken, buildSaleQueuedFlex(roundId, grades, buyer));
+      }
+      return;
     }
   }
   else if (state.action === 'PRODUCTION') {
@@ -529,6 +745,27 @@ function handleTextMessage(event) {
     rejectItem(state.data.itemId, text);
     clearState(userId);
     replyMessage(event.replyToken, buildSuccessFlex('ปฏิเสธรายการเรียบร้อย'));
+  }
+  else if (state.action === 'RETURN' && state.step === 'WAIT_RETURN_REASON') {
+    const result = returnItemForEdit(state.data.itemId, text);
+    clearState(userId);
+    if (!result.success) {
+      replyMessage(event.replyToken, buildErrorFlex('ไม่พบรายการหรือถูกดำเนินการไปแล้ว'));
+      return;
+    }
+    // แจ้งคนที่ส่งมาให้รู้ว่าต้องแก้ไข — ถ้า push ไม่สำเร็จ (เช่น block บอท)
+    // ไม่ให้กระทบ flow หลัก แค่ log ไว้เฉยๆ
+    if (result.recorderId) {
+      try {
+        pushMessage(result.recorderId, {
+          type: 'text',
+          text: `⚠️ รายการที่คุณส่งไปวันที่ ${formatRoundIdAsDate(result.roundId)} เจ้าของขอให้แก้ไข:\n\n${text}\n\nพิมพ์ "บันทึกการขาย" เพื่อกรอกใหม่ได้เลยครับ (ระบบจะทับของเดิมให้อัตโนมัติ)`
+        });
+      } catch (e) {
+        logErrorToSheet('RETURN_START', 'push แจ้งผู้ส่งรายการไม่สำเร็จ', e.toString());
+      }
+    }
+    replyMessage(event.replyToken, buildSuccessFlex('ส่งกลับให้แก้ไขเรียบร้อย แจ้งผู้ส่งแล้วครับ'));
   }
 }
 

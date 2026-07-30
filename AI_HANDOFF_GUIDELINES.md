@@ -1,109 +1,121 @@
-# Handoff: Durian Farm Management System — Role/Menu & Scan-Flow Bug Fixes
+# Handoff: Durian Farm Management System — Bug Fixes + Harvest/Sale Split
 
 ## Status
-บั๊ก 8 ตัวแก้เสร็จแล้วในไฟล์ local + **automated test 117 เคสผ่านทั้งหมด** + push ขึ้น GitHub แล้ว
-
-**สิ่งที่ยังไม่เสร็จ:** ผู้ใช้ยังไม่ได้ deploy รอบล่าสุดและยืนยันบนเครื่องจริงครบทุกข้อ — ที่ยังไม่รู้ผลคือ รูปในหน้าต้นไม้ / ปุ่มเปิดแชท (`target="_top"`) / flow ตัดจำหน่ายจนจบ / race condition สองคนพร้อมกัน (ดู `docs/QA_CHECKLIST.md`)
+งาน 2 ชุดเสร็จในไฟล์ local แล้ว (แก้บั๊ก 8 ตัว + แยกการเก็บเกี่ยวออกจากการขาย) **automated test 181 เคสผ่านทั้งหมด** แต่ **ผู้ใช้ยังไม่ได้ deploy และยังไม่ได้ทดสอบบนเครื่องจริงเลยสักข้อ** ชุดแก้บั๊กถูก push ขึ้น GitHub แล้ว (`9821582`) ส่วนชุดแยก harvest/sale ยังไม่ได้ commit
 
 ## Goal
-ผู้ใช้ขอให้แก้บั๊กด้วย `debug-mantra` discipline แล้วทำ QA ทั้งระบบ โดยแจ้งว่าอะไรต้องให้ผู้ใช้ทดสอบเองเพราะข้อจำกัดของ agent
+ผู้ใช้ (Siraphob / "ตะวัน") ดูแลระบบจัดการสวนทุเรียนที่ใช้งานจริง — Google Apps Script + LINE OA + Google Sheets + Drive ขอให้แก้บั๊กด้วย `debug-mantra` discipline, ทำ QA ทั้งระบบ, แล้วปรับ flow ตัดขายให้ตรงกับขั้นตอนจริงหน้าสวน
 
-## What's done (session นี้)
+## What's done
 
-### บั๊ก 1: เจ้าของสวนกลายเป็นลูกค้า — root cause หายาก เดาผิด 3 รอบ
-สมมติฐานที่ **ผิด** (บันทึกไว้กันเสียเวลาซ้ำ):
-1. ~~menu ID ที่โค้ดใช้ถูกลบไปแล้ว~~ → `listRichMenus()` พิสูจน์ว่ามีอยู่ครบ 5 เมนู
-2. ~~เมนูมีอยู่แต่ยังไม่อัปโหลดรูป จึง link ไม่ได้~~ → ทุกเมนูมีรูปครบ
-3. ~~userId ในชีตไม่ตรงกับ `OWNER_LINE_ID`~~ → `diagnoseUserRows()` พิสูจน์ว่าตรง
+### ชุดที่ 1 — แก้บั๊ก 8 ตัว (push แล้ว commit `9821582`)
 
-**Root cause จริง**: `syncUserRichMenu()` ถูกเรียกแค่ 3 จุด — ตอน `handleFollow`, ตอนสร้างผู้ใช้ใหม่, และตอนแก้ role ผ่าน Dashboard — **ไม่มีจุดไหนอัปเดตเมนูเมื่อ role ถูกแก้ด้วยมือในชีต** บัญชี "ตะวัน" add friend ตอนยังไม่มีสิทธิ์ → ถูกตั้งเป็น Customer + ผูกเมนูลูกค้า → แก้ชีตเป็น "เจ้าของ" ทีหลัง → เมนูบน LINE ไม่มีอะไรไปสั่งให้เปลี่ยน ค้างถาวร
+1. **เจ้าของสวนเห็นเมนูลูกค้า** — `syncUserRichMenu` ถูกเรียกแค่ตอน add friend / สร้างผู้ใช้ใหม่ / แก้ role ผ่าน Dashboard **ไม่มีจุดไหนอัปเดตเมนูเมื่อแก้ role ด้วยมือในชีต** → เมนูค้างถาวร แก้ด้วย `ensureRichMenuMatchesRole()` เรียกทุก event (เทียบ CacheService ก่อนยิง LINE API — ทัก 5 ครั้งยิงครั้งเดียว)
+2. **ลูกค้าสแกน QR แล้วค้าง** — `doGet` ไม่เคยอ่าน `tree` param → เสิร์ฟหน้า LIFF scanner ผิดหน้า แก้ด้วย route `?tree=` (รวม `liff.state`) ไปหน้าใหม่ `TreeInfo.html` ที่ไม่ใช้ LIFF SDK
+3. **หน้าเว็บแก้ role ไม่บันทึก** — `UsersVM.changeRole(userId)` อ้างตัวแปร `targetId`/`newRole` ที่ไม่มีจริง → ReferenceError เงียบ
+4. **flow ตัดจำหน่ายทำรายการไม่จบ** — บล็อก `WAIT_PHOTO` ถูกเขียนซ้อนในสาขา `REGISTER_TREE` ทั้งที่เช็ค `action === 'HARVEST'` = dead code ตลอดกาล
+5. **รูปไม่ขึ้นในหน้าต้นไม้** — `file.getUrl()` เป็นหน้า viewer ไม่ใช่ไฟล์รูป เพิ่ม `toDriveImageUrl()`
+6. **ปุ่มเปิดแชทค้างใน iframe** — เพิ่ม `target="_top"` + ปุ่มคัดลอกคำสั่งเป็นทางสำรอง
+7. **admin แก้สิทธิ์ไม่ได้** — `updateUserRoleWeb` จำกัดเฉพาะ `'เจ้าของ'` เปลี่ยนเป็น `isOwnerOrAdmin()` + กันแก้สิทธิ์ตัวเอง
+8. **ลูกค้าเห็นปุ่มบันทึก** — server ไม่ส่ง `BOT_BASIC_ID` ให้ผู้ไม่มีสิทธิ์เลย + OAuth state พก `returnTo` กลับหน้าต้นไม้เดิม + จำ session 6 ชม. ใน localStorage
 
-**แก้**: เพิ่ม `ensureRichMenuMatchesRole()` (SheetOperations.gs) เรียกทุก event ใน `handlePostback`/`handleTextMessage` — จำ role ที่ผูกไปล่าสุดใน CacheService ยิง LINE API เฉพาะตอนไม่ตรง (ทดสอบแล้ว: ทัก 5 ครั้ง ยิงครั้งเดียว)
+**Robustness ที่เพิ่ม:** `withScriptLock()` ครอบ `registerUser` และ gen-รหัสต้นไม้+เข้าคิวเป็นก้อนเดียว · `linkRichMenuToUser` เลิกกลืน error (เพิ่ม `muteHttpExceptions` + log) · `logErrorToSheet()` เขียนลงชีต `Error Log` แทนชีต `Config` ที่ถูก migrate ไปแล้ว · `getUserRole` trim ค่า
 
-### บั๊ก 2: ลูกค้าสแกน QR แล้วค้างที่ liff.init
-`doGet()` ไม่เคยอ่าน `tree` param → เสิร์ฟหน้า LIFF scanner ผิดหน้า → ค้างเพราะ LIFF ใช้ใน GAS iframe ไม่ได้ (ข้อจำกัดเดิมที่รู้อยู่แล้ว)
-**แก้**: route `?tree=X` (รวมที่มาทาง `liff.state`) ไปหน้าใหม่ `TreeInfo.html` — server-rendered ล้วน ไม่มี LIFF SDK เลย สแกนด้วยกล้องอะไรก็เปิดได้
+### ชุดที่ 2 — แยกการเก็บเกี่ยวออกจากการขาย (ยังไม่ commit)
 
-### บั๊ก 3: หน้าเว็บแก้โรลไม่มีปุ่มเซฟ
-`UsersVM.changeRole(userId)` อ้างตัวแปร `targetId`/`newRole` ที่ไม่มีอยู่จริง → ReferenceError เงียบๆ ทุกครั้ง
-**แก้**: รับพารามิเตอร์ให้ถูก + confirm ก่อนเซฟ + revert dropdown ถ้ายกเลิก + reload หลังสำเร็จ
+**ปัญหา:** ชีต `การเก็บเกี่ยว` เก็บ `treeId + เกรด + ราคา` ไว้แถวเดียวกัน ซึ่งผิดตั้งแต่แนวคิด — หน้างานจริงคือ ตัดทั้งต้นทีละต้น → ชั่ง 1 ครั้งต่อตะกร้า → เทรวมกอง → คัดเกรดขาย **พอเทรวมแล้วไม่มีทางรู้ว่าเกรด A มาจากต้นไหน** และตอนคนสวนชั่งก็ยังไม่รู้เกรด/ราคา
 
-### บั๊ก 4 (เจอเองระหว่าง QA): flow ตัดจำหน่ายทำรายการไม่จบเลย
-บล็อกจัดการ `"ส่งรูปครบแล้ว"`/`"ข้าม"` ถูกเขียนซ้อนอยู่ในสาขา `REGISTER_TREE` ทั้งที่โค้ดข้างในเช็ค `state.action === 'HARVEST'` → dead code เข้าไม่ถึงตลอดกาล คนสวนถ่ายรูปตาชั่งเสร็จ กดปุ่มแล้วบอทเงียบ ทำรายการไม่จบสักครั้งตั้งแต่ต้น
-**แก้**: ย้าย WAIT_PHOTO ออกมาเป็นสาขาระดับบนใช้ร่วมกันทั้งสอง flow + เพิ่ม fallback ถ้าพิมพ์อย่างอื่นระหว่างรอรูป
+**แก้เป็น 2 ตาราง + 1 รอบ = 1 วัน** (ผู้ใช้ยืนยัน "ขายทุกวันที่ตัด") รหัสรอบ `H-25680727` สร้างจากวันที่อัตโนมัติ ไม่ต้องเปิด/ปิดรอบเอง
 
-### บั๊ก 5-6 (ผู้ใช้เจอบนมือถือจริง รอบล่าสุด — แก้แล้วแต่ยังไม่ทดสอบ)
-- **รูปไม่ขึ้นในหน้าต้นไม้**: `savePhotoToDrive()` เก็บ `file.getUrl()` ซึ่งเป็นหน้า viewer ไม่ใช่ไฟล์รูป → เพิ่ม `toDriveImageUrl()` ฝั่ง server แปลงเป็น `drive.google.com/thumbnail?id=...` (ตรรกะเดียวกับ `UtilsVM.getDriveImageUrl()` ที่ Dashboard ใช้อยู่แล้ว)
-- **กดปุ่มบันทึกแล้วค้างที่ "โปรดเปิด LINE"**: ลิงก์ navigate ภายใน GAS iframe → LINE บล็อกการเปิดแอป → ใส่ `target="_top"` + เพิ่มปุ่ม "คัดลอกคำสั่ง" เป็นทางสำรอง
+| ฟังก์ชันใหม่ | ที่อยู่ | หน้าที่ |
+|---|---|---|
+| `getHarvestRoundId()` / `formatRoundIdAsDate()` | SheetOperations.gs | รหัสรอบจากวันที่ (ใช้ timezone ไทย) |
+| `getHarvestRoundSummary()` / `getTreeRoundTotal()` | SheetOperations.gs | สรุปยอดตัดของวัน รวมหลายตะกร้าของต้นเดียวกัน |
+| `saveSaleRound()` / `getSaleRoundTotals()` / `parseSaleGradeLines()` | SheetOperations.gs | บันทึก/อ่านการขาย (เขียนทับทั้งรอบเพื่อแก้ไขซ้ำได้) |
+| `getRevenueByTree()` / `getRevenueByTreeWeb()` | SheetOperations.gs | รายได้ต่อต้น เฉลี่ยตามสัดส่วนน้ำหนัก |
+| `getRoundsMissingSale()` | SheetOperations.gs | วันที่ตัดแล้วลืมบันทึกขาย |
+| `migrateToSaleRounds()` / `verifySaleRoundSetup()` | DatabaseSetup.gs | สร้างชีต+คอลัมน์ให้อัตโนมัติ |
+| `buildSaleRoundPromptFlex/ConfirmFlex/SavedFlex` | FlexMessages.gs | การ์ดใน LINE |
 
-### บั๊ก 7: admin แก้สิทธิ์ผู้ใช้ไม่ได้ ("Only owner can change roles")
-`updateUserRoleWeb` เช็ค `role !== 'เจ้าของ'` ซึ่งไม่สอดคล้องกับที่อื่นที่ admin ทำได้ทุกอย่างผ่าน `isOwnerOrAdmin`
-**แก้** (ผู้ใช้เลือก policy เอง): admin แก้ได้เท่าเจ้าของ รวมถึงตั้งคนอื่นเป็น "เจ้าของ" ได้ + เพิ่ม guard ห้ามแก้สิทธิ์ตัวเอง (กันล็อกตัวเองออก — UI disable อยู่แล้วแต่ server ต้องกันด้วย)
+**Flow ใหม่:** คนสวนเหลือ 3 ขั้น (สแกน → พิมพ์ `45 18` → ถ่ายรูป) · เจ้าของกด `SALE_ROUND` วันละครั้ง → พิมพ์ `A 60 130` หลายบรรทัด → ยืนยัน → ระบบเฉลี่ยรายได้กลับไปทุกต้น
 
-### บั๊ก 8: ลูกค้าเห็นปุ่มตัดจำหน่าย/บันทึกผลผลิตในหน้าต้นไม้
-หน้า TreeInfo เปิดจากการสแกน QR แบบไม่มี login — `doGet` ไม่มีทางรู้ว่าใครเปิด (LINE ไม่แนบ userId มากับ HTTP request ธรรมดา, LIFF SDK ใช้ไม่ได้ใน GAS iframe)
-**แก้**: ใช้ LINE Login OAuth ที่มีอยู่แล้ว
-- ขยาย `generateOAuthState(returnTo)` ให้เซ็น `returnTo` รวมใน HMAC → พา login กลับมาที่ **หน้าต้นไม้เดิม** ไม่ใช่ Dashboard (คนสวนไม่มีสิทธิ์ Dashboard อยู่แล้ว)
-- `consumeOAuthState` เปลี่ยนจากคืน boolean เป็น `{valid, returnTo}` — **ผู้เรียกทุกที่ต้องอ่าน `.valid`** (object เป็น truthy เสมอ ถ้าลืมจะกลายเป็นช่องโหว่เงียบๆ) แก้ที่ `doGet` แล้ว
-- `getMyRoleWeb(sessionToken)` + `canRecordFromScan(role)` (คนสวน/เจ้าของ/admin เท่านั้น)
-- **server ไม่ส่ง `BOT_BASIC_ID` ไปหน้าเว็บเลยถ้าไม่มีสิทธิ์** — ซ่อนที่ต้นทาง ไม่ใช่ซ่อนด้วย CSS
-- TreeInfo จำ session ใน localStorage 6 ชม. (try/catch — GAS iframe บางเครื่องบล็อก storage) คนสวนสแกนต้นถัดไปไม่ต้อง login ซ้ำ
-- ลูกค้าเห็นแค่ลิงก์เล็ก "🔑 เจ้าหน้าที่สวน" ถ้า login แล้วไม่มีสิทธิ์ก็ไม่แสดงอะไรเพิ่ม
+### รอบแก้หลัง scrutinize (สำคัญ — เกือบ deploy ทั้งที่ใช้ไม่ได้)
 
-### งานอื่นที่ปิดในรอบนี้
-- **LockService** (ค้างจาก handoff เดิม ข้อ 5): ครอบ `registerUser` และครอบ `generateNextTreeId()`+`addToPendingQueue()` เป็นก้อนเดียวใน `CONFIRM` (ช่องว่างระหว่างสองฟังก์ชันคือจุดที่รหัสต้นไม้ซ้ำได้) — helper `withScriptLock()` รอ lock 10 วิ
-- **Error log ย้ายออกจากชีต Config**: helper `logErrorToSheet()` เขียนลงชีต **"Error Log"** แทน ใช้ที่ `doPost`/`doGet`/`replyMessage`/`linkRichMenuToUser`
-- **`linkRichMenuToUser` เคยกลืน error เงียบๆ** (ไม่มี `muteHttpExceptions` → throw → ถูก catch ใน `syncUserRichMenu` ลง console ที่ไม่มีใครดู) — **นี่คือเหตุผลที่บั๊ก 1 หายากขนาดนี้** ตอนนี้ลง Error Log พร้อม userId + menuId + คำตอบจาก LINE
-- **`getUserRole` trim ค่า** — space ตัวเดียวจากการแก้ชีตด้วยมือเคยทำให้สิทธิ์หายเงียบๆ
-- **`registerUserWithDefaultRole()`** — ถ้า userId ตรงกับ `OWNER_LINE_ID` ลงทะเบียนเป็น "เจ้าของ" ไม่ใช่ "Customer"
-- **Feature สลับ role**: `TestSwitch.gs` เขียนใหม่ — `testAsOwner/Admin/Worker/Customer()` อัปเดตทั้งชีตและเมนูจริง ใช้ `OWNER_LINE_ID` จาก Script Properties (ไม่ hardcode userId เหมือนเดิม)
+การ scrutinize หลังเขียนเสร็จจับได้ 4 จุดที่เทสต์ 181 เคสมองไม่เห็น:
 
-### Automated test suite (ใหม่)
-`outputs/gasmock.js` + `qa.js` + `qa2.js` — mock GAS runtime (SpreadsheetApp/CacheService/UrlFetchApp/LockService/HtmlService) แล้วโหลดไฟล์ `.gs` จริงเข้าไปรัน **89 เคสผ่านหมด** ครอบ role/สิทธิ์, rich menu, doGet routing, หน้าต้นไม้, lock, error log, webhook security, ทุก flow ของบอท, session/OAuth
-> อยู่ใน scratchpad ของ agent ไม่ได้อยู่ในโปรเจกต์ — ถ้าอยากเก็บถาวรต้องย้ายเข้า repo เอง
+1. **🔴 `SALE_ROUND` ไม่มีปุ่มไหนยิงเลย** — ฟีเจอร์ทั้งชุดเข้าไม่ถึง เพราะเทสต์ทุกเคสยิง postback ตรงๆ ข้ามชั้น UI แก้โดยเพิ่มปุ่มใน `buildDashboardMenuFlex()` + ตาราง `TEXT_SHORTCUTS` ใน `Code.gs` (พิมพ์ `บันทึกการขาย` ได้)
+2. **🔴 `getIncomeDataWeb()` (แท็บ "รายได้" ในเว็บ) ยังอ่านราคาจากแถวรายต้น** → แถวใหม่ราคาว่าง = รายได้ 0 ทั้งหน้า เขียนใหม่ให้อ่านจากรอบขาย (1 รายการ = 1 รอบ ไม่ใช่ 1 ต้น) + fallback แถวเก่า
+3. **🟡 อ่านชีตรอบขายซ้ำต่อรอบ** → 60 รอบ = อ่านชีตเป็นร้อยครั้งต่อการเปิด Dashboard 1 ครั้ง เพิ่ม `buildSaleRoundIndex()` อ่านครั้งเดียวแล้วส่ง map ต่อ (มีเทสต์นับจำนวนครั้งที่อ่านจริง)
+4. **🟡 `Dashboard.js.html` ใช้ `h.grade !== '-'` แยกขาย/เสียหาย** → แถวใหม่ grade เป็น `-` เสมอ รายการตัดขายจะถูกมองเป็นความเสียหายหมด เปลี่ยนไปเช็ค `h.reason === 'ตัดขาย'`
 
-## จุดที่ค้างไว้ตามคำขอผู้ใช้ (ยังไม่ต้องทำ)
-**flow ตัดขายต้องเปลี่ยนเป็น 1 ลูก/1 รายการ** — ปัจจุบันกรอกเป็นยอดรวม (จำนวน+น้ำหนัก+ราคารวม) แต่ความจริงหน้างานต้องบันทึกทีละลูก หรือขายเป็นล็อตในอนาคต ผู้ใช้บอกว่า **"ขอดูหน้างานจริงก่อน ค้างไว้ก่อน"** — อย่าเพิ่งลงมือ รอผู้ใช้กลับมาบอกรูปแบบที่ต้องการ
+**เทสต์ป้องกันซ้ำที่เพิ่ม:** สแกนหา `action === 'X'` ทุกตัวใน `Code.gs` แล้วบังคับว่าต้องมี `action=X` ปรากฏใน Flex/RichMenu/TEXT_SHORTCUTS จริง — พิสูจน์แล้วว่าจับบั๊กเดิมได้ (ย้อนโค้ดกลับแล้วเทสต์แดง)
 
 ## What's next
-0. **ผู้ใช้ยังไม่ได้ deploy รอบล่าสุด** — เริ่มจากยืนยันว่าวางไฟล์ครบทั้ง 6 ไฟล์แล้วหรือยัง (`Code.gs`, `SheetOperations.gs`, `LineAPI.gs`, `TestSwitch.gs`, `Dashboard.js.html`, `TreeInfo.html`) แล้ว Deploy → New version
-1. **ผู้ใช้ deploy + ทดสอบตาม `docs/QA_CHECKLIST.md`** (สร้างใหม่ในรอบนี้) — ที่ยังไม่ยืนยัน: รูปในหน้าต้นไม้, ปุ่มเปิดแชท (`target="_top"` จะรอดหรือไม่), flow ตัดจำหน่ายจนจบ, race condition 2 คนพร้อมกัน
-2. **รัน `resyncAllRichMenus()` หนึ่งครั้ง** เพื่อซ่อมเมนูให้ทุกคนตาม role ปัจจุบัน (ยังไม่ยืนยันว่ารันแล้ว)
-3. ~~commit + push GitHub~~ — **เสร็จแล้ว** push ครบทุกอย่างในรอบนี้ รวม `docs/QA_CHECKLIST.md`, `gas/TreeInfo.html` และ README ที่อัปเดตแล้ว
-4. เปลี่ยน `PROXY_SECRET` — ค่าปัจจุบันเป็นคำที่เดาง่าย เป็นสิ่งเดียวที่กัน request ปลอมข้าม Cloudflare Worker (ต้องแก้ทั้ง Script Property และ Worker ให้ตรงกัน)
-5. ยังไม่ทำ (เสนอแล้ว ไม่ได้ขอ): dashboard session ย้ายจาก CacheService ไปเป็น signed token แบบเดียวกับ OAuth state, ลบ rich menu ซ้ำ 2 คู่ที่เกิดจากรัน `setupRichMenus()` สองรอบ
 
-## Key decisions made (session นี้)
-- **หน้าข้อมูลต้นไม้ไม่ใช้ LIFF เลย** — server-rendered ล้วน เพราะ LIFF ใน GAS iframe พังตั้งแต่ session ก่อน สแกนด้วยกล้องอะไรก็เปิดได้ ทุก role ใช้ได้
-- **แยกสิทธิ์ที่ server ไม่ใช่ที่หน้าเว็บ** — ปุ่มบันทึกในหน้าต้นไม้แสดงให้ทุกคน แต่ `doPost` เช็ค role อยู่แล้ว ลูกค้ากดก็ได้แค่ข้อมูลต้นไม้
-- **แปลง Drive URL ที่ฝั่ง server** (`toDriveImageUrl` ใน SheetOperations.gs) ไม่ใช่ฝั่ง client — เพื่อให้เขียน automated test ครอบได้
-- **lock ครอบ gen-รหัส + เข้าคิว เป็นก้อนเดียว** ไม่ใช่ lock แยกทีละฟังก์ชัน เพราะช่องว่างระหว่างสองฟังก์ชันคือจุดที่ race เกิด
+1. **ผู้ใช้ deploy + ทดสอบ** — ยังไม่ได้ทำเลย ดู `docs/QA_CHECKLIST.md` (หัวข้อ 6-NEW คือของชุดที่ 2)
+2. **รัน `migrateToSaleRounds()` ก่อน deploy** จาก Apps Script editor แล้วยืนยันด้วย `verifySaleRoundSetup()`
+3. **รัน `resyncAllRichMenus()` หนึ่งครั้ง** ซ่อมเมนูให้ทุกคนตาม role ปัจจุบัน (ยังไม่ยืนยันว่ารันแล้ว)
+4. **commit + push ชุดที่ 2** — ยังไม่ได้ commit เลย
+5. เปลี่ยน `PROXY_SECRET` เป็นค่าสุ่มยาว (ปัจจุบันเป็นคำที่เดาง่าย) แก้ทั้ง Script Property และ Cloudflare Worker ให้ตรงกัน
+6. **ยังไม่ได้ทำ (ผู้ใช้ยังไม่สั่ง):** ตารางรายได้ต่อต้นในหน้า Dashboard เว็บ — ฝั่ง API `getRevenueByTreeWeb()` พร้อมแล้วพร้อม `note` กำกับว่าเป็นค่าประมาณ แต่ยังไม่ได้ต่อ UI
 
-## Files changed (session นี้)
-- `gas/Code.gs` — doGet route `?tree=`; WAIT_PHOTO ย้ายเป็นสาขาระดับบน; `withScriptLock` ครอบ CONFIRM; `logErrorToSheet`; `registerUserWithDefaultRole`; `ensureRichMenuMatchesRole`
-- `gas/SheetOperations.gs` — `RICH_MENU_IDS`, `withScriptLock`, `logErrorToSheet`, `getTreePublicInfo`, `toDriveImageUrl`, `registerUserWithDefaultRole`, `ensureRichMenuMatchesRole`; `getUserRole` trim; `registerUser` lock; `updateUserRoleWeb` validate role
-- `gas/LineAPI.gs` — `linkRichMenuToUser` ไม่กลืน error แล้ว; `replyMessage` log ลง Error Log
-- `gas/TestSwitch.gs` — เขียนใหม่ทั้งไฟล์: สลับ role 4 แบบ + `listRichMenus`, `diagnoseRichMenuLink`, `diagnoseUserRows`, `checkMyRichMenu`, `resyncAllRichMenus`
-- `gas/Dashboard.js.html` — `UsersVM.changeRole` แก้บั๊ก + confirm
-- `gas/TreeInfo.html` — **ไฟล์ใหม่** หน้าข้อมูลต้นไม้ (ต้องสร้างเป็นไฟล์ HTML ชื่อ `TreeInfo` ใน editor)
-- `docs/QA_CHECKLIST.md` — **ไฟล์ใหม่** checklist ทดสอบด้วยมือ
-- Script Property ใหม่: `BOT_BASIC_ID` (Basic ID ของ OA จาก **Messaging API channel** ไม่ใช่ LINE Login channel)
-- ชีตใหม่: **"Error Log"** (เวลา / แหล่งที่มา / ข้อความ / รายละเอียด) — ชื่อต้องตรงเป๊ะ
+## Key decisions made
+
+- **1 รอบ = 1 วัน** ตัดสินหลังผู้ใช้เปลี่ยนกฎเป็น "ขายทุกวันที่ตัด" — ทำให้ไม่ต้องมีปุ่มเปิด/ปิดรอบ ไม่ต้องเก็บ state ไม่มี race condition (เดิมออกแบบไว้รองรับรอบ 1-3 วัน ทิ้งไปแล้ว)
+- **เพิ่มคอลัมน์ ไม่ลบของเดิม** — คอลัมน์ `เกรด`/`ราคา/กก.` ยังอยู่ในชีต (ติดป้าย "เลิกใช้") แถวใหม่เว้นว่าง รายงาน fallback ไปอ่านของเก่าเมื่อไม่มีรหัสรอบ → รายได้ย้อนหลังไม่หาย
+- **จงใจไม่เติมรหัสรอบย้อนหลัง** — ถ้าเติม ระบบจะมองว่าเป็นข้อมูลรูปแบบใหม่แล้วไปหาราคาในชีต `รอบขาย` ซึ่งไม่มี → **รายได้ย้อนหลังกลายเป็น 0 ทันที** มีเทสต์ล็อกไว้
+- **สแกนต้นเดิมซ้ำ = append แถวใหม่** ไม่ใช่ update แถวเดิม — ได้ audit trail ครบ (แต่ละตะกร้ามีรูปของตัวเอง) ไม่มี race condition การ "บวกให้" เกิดตอนอ่าน
+- **รายได้ต่อต้นเป็นค่าประมาณ** เฉลี่ยตามน้ำหนัก ไม่ใช่เกรดจริง (ตามกลับไม่ได้) — ผู้ใช้ยอมรับแล้ว แต่หน้ารายงานต้องกำกับเสมอ
+- **หน้า TreeInfo ไม่ใช้ LIFF เลย** — server-rendered ล้วน เพราะ LIFF ใน GAS iframe พังตั้งแต่ session ก่อน
+- **ประวัติในหน้า TreeInfo ไม่มีข้อมูลราคา** — `getTreeHistoryPublic()` ไม่อ่านคอลัมน์ราคาเลย ไม่ใช่แค่ไม่แสดง มีเทสต์บังคับ
+- **admin แก้สิทธิ์ได้เท่าเจ้าของ** รวมถึงตั้งคนอื่นเป็น "เจ้าของ" (ผู้ใช้เลือกเอง) + guard ห้ามแก้สิทธิ์ตัวเอง
+
+## Files changed or created
+
+**ชุดที่ 1 (push แล้ว):**
+- `gas/Code.gs` — doGet route `?tree=`, WAIT_PHOTO ย้ายเป็นสาขาบน, lock ครอบ CONFIRM, `logErrorToSheet`, `registerUserWithDefaultRole`, `ensureRichMenuMatchesRole`
+- `gas/SheetOperations.gs` — `RICH_MENU_IDS`, `withScriptLock`, `logErrorToSheet`, `getTreePublicInfo`, `toDriveImageUrl`, `getTreeHistoryPublic`, `getMyRoleWeb`, `canRecordFromScan`, OAuth state พก `returnTo`
+- `gas/LineAPI.gs` — `linkRichMenuToUser` ไม่กลืน error
+- `gas/TestSwitch.gs` — เขียนใหม่: สลับ role 4 แบบ + `listRichMenus`, `diagnoseUserRows`, `diagnoseRichMenuLink`, `resyncAllRichMenus`, `checkMyRichMenu`
+- `gas/Dashboard.js.html` — แก้ `UsersVM.changeRole` + confirm
+- `gas/TreeInfo.html` — **ใหม่** หน้าข้อมูลต้นไม้ + แกลเลอรี + lightbox + ประวัติ + ปุ่มตามสิทธิ์
+- `docs/QA_CHECKLIST.md` — **ใหม่**
+- `README.md` / `README_EN.md` — อัปเดต Recent Updates (สไตล์ `management-talk`)
+
+**ชุดที่ 2 (ยังไม่ commit):**
+- `gas/SheetOperations.gs` — ฟังก์ชันรอบ/ขาย/รายได้ต่อต้น ตามตารางข้างบน + `getDashboardSales`/`getDashboardByGrade` อ่านจากชีต `รอบขาย`
+- `gas/Code.gs` — flow `WAIT_WEIGHT_COUNT`, action `SALE_ROUND`/`SALE_CONFIRM`, CONFIRM แนบ `roundId`, `approveItem` เขียนคอลัมน์รอบ
+- `gas/FlexMessages.gs` — 3 การ์ดใหม่ + `buildHarvestSummaryFlex` ตัดเกรด/ราคาออก
+- `gas/PushScheduler.gs` — เตือนวันที่ยังไม่บันทึกขาย
+- `gas/DatabaseSetup.gs` — `migrateToSaleRounds()`, `verifySaleRoundSetup()`, หัวชีตใหม่
+- `docs/DESIGN_harvest_lot.md` — **ใหม่** design เต็ม + สูตร + ข้อจำกัด
+
+**Test suite (อยู่ใน agent scratchpad ไม่ได้อยู่ใน repo):** `gasmock.js` (mock GAS runtime) + `qa.js` (54) + `qa2.js` (63) + `qa3.js` (64) — รวม 181 เคส
 
 ## Context the next agent needs
-> ข้อ 1-8 สืบทอดจาก session ก่อน ยังใช้ได้ทั้งหมด
 
 1. **ห้ามถามค่า secret จริงจากผู้ใช้** (`CHANNEL_SECRET`, `LOGIN_CHANNEL_SECRET`, `PROXY_SECRET`)
-2. **GAS `doPost`/`doGet` อ่าน HTTP header ไม่ได้เลย** — เหตุผลที่มี Cloudflare Worker proxy
-3. **หน้าเว็บ GAS ถูก serve ใน iframe เสมอ** บน origin `*-script.googleusercontent.com` ที่ต่างจาก URL ในแถบที่อยู่ — ทำให้ LIFF ใช้ไม่ได้ และเคยลอง "หลุด iframe" ด้วย `window.location.href` แล้วไม่สำเร็จ **(รอบนี้ลองใหม่ด้วย `target="_top"` ซึ่งเป็น browser-level navigation ไม่ต้องอ่าน URL — ยังไม่ยืนยันผล มีปุ่มคัดลอกเป็นทางสำรองแล้ว)**
-4. **Executions log** (ไอคอนนาฬิกา แถบซ้าย) คือเครื่องมือวินิจฉัยหลัก — เช็คก่อนตั้งสมมติฐานเสมอ
+2. **GAS `doPost`/`doGet` อ่าน HTTP header ไม่ได้เลย** — เหตุผลที่มี Cloudflare Worker proxy (`https://durian-line-verifier.siraphob-an.workers.dev/`) ส่ง `?proxy_secret=` มาให้
+3. **หน้าเว็บ GAS ถูก serve ใน iframe เสมอ** บน origin `*-script.googleusercontent.com` — ทำให้ LIFF ใช้ไม่ได้ และเคยลอง "หลุด iframe" ด้วย `window.location.href` แล้วไม่สำเร็จ **รอบนี้ลองใหม่ด้วย `target="_top"` (browser-level nav ไม่ต้องอ่าน URL) ยังไม่ยืนยันผล มีปุ่มคัดลอกเป็นทางสำรอง**
+4. **Executions log** (ไอคอนนาฬิกา แถบซ้าย) คือเครื่องมือวินิจฉัยหลัก เช็คก่อนตั้งสมมติฐานเสมอ
 5. **ทุกการแก้โค้ดต้อง Deploy → Manage deployments → ✏️ → New version → Deploy** แค่บันทึกไฟล์ไม่พอ
 6. **ผู้ใช้ copy ไฟล์เข้า Apps Script editor เอง** (ไม่ได้ใช้ clasp) — ต้องบอกชัดว่าไฟล์ไหนบ้าง
-7. โฟลเดอร์ผู้ใช้ sync กับ OneDrive — git จาก sandbox อาจล้มด้วย `EPERM`
-8. `LIFF_ID` = `"{channelId}-{randomString}"` โดย channelId เป็นของ **LINE Login channel** ส่วน `BOT_BASIC_ID` เป็นของ **Messaging API channel** คนละตัวกัน
-9. **บทเรียนสำคัญจากรอบนี้**: บั๊ก "เจ้าของกลายเป็นลูกค้า" เสียเวลาไป 3 สมมติฐานเพราะทุกครั้งตั้งอยู่บนสมมติฐานว่า "มีอะไรพัง" ทั้งที่ความจริงคือ **ไม่มีอะไรพังเลย — แค่ไม่มีใครเรียกฟังก์ชัน** ถ้าเจอบั๊กแนว "ค่าถูกในฐานข้อมูลแต่พฤติกรรมผิด" ให้ `grep` หาว่า **ใครเรียกฟังก์ชันที่ทำให้เกิดผลนั้นบ้าง** ก่อนจะเดาว่ามันทำงานล้มเหลว
-10. **ยิง API ภายนอกทุกจุดต้องใส่ `muteHttpExceptions: true` แล้ว log ผลลัพธ์** — โค้ดที่ throw แล้วถูก catch กลืนคือที่มาของบั๊กที่หายากที่สุดในโปรเจกต์นี้
-11. Preferences ผู้ใช้: ตอบกระชับตรงประเด็น ภาษาไทยเป็นหลักผสมศัพท์เทคนิคอังกฤษ, step-by-step สำหรับงานที่ต้องทำมือ, แก้ไฟล์ตรงๆ ไม่ต้องโชว์ diff ก่อน
+7. โฟลเดอร์ผู้ใช้ sync OneDrive — git จาก sandbox ใช้ได้ แต่ `.git/index.lock` ลบไม่ได้ถ้าค้าง (ต้องขอ permission ผ่าน `allow_cowork_file_delete`) และ **`git push` ทำไม่ได้จาก sandbox** (ไม่มี credential) ต้องให้ผู้ใช้รันเอง
+8. `LIFF_ID` เป็นของ **LINE Login channel** ส่วน `BOT_BASIC_ID` เป็นของ **Messaging API channel** คนละตัวกัน
+9. **Script Properties ที่ต้องมี:** `SPREADSHEET_ID`, `ACTIVE_SEASON`, `CHANNEL_SECRET`, `CHANNEL_ACCESS_TOKEN`, `LIFF_ID`, `LOGIN_CHANNEL_SECRET`, `PROXY_SECRET`, `OWNER_LINE_ID`, `DRIVE_FOLDER_ID`, `BOT_BASIC_ID`
+10. **ชีตที่ต้องมี:** `ต้นไม้`, `ผลผลิต`, `การเก็บเกี่ยว`, `คิวรออนุมัติ`, `ผู้ใช้`, `ฤดูกาล`, `Error Log`, `รอบขาย`
+11. **บทเรียนสำคัญ 2 ข้อจาก session นี้:**
+    - บั๊ก "เจ้าของกลายเป็นลูกค้า" เสียเวลา 3 สมมติฐานผิด เพราะทุกครั้งตั้งอยู่บนสมมติฐานว่า "มีอะไรพัง" ทั้งที่ความจริงคือ **ไม่มีอะไรพัง — แค่ไม่มีใครเรียกฟังก์ชัน** ถ้าเจอบั๊กแนว "ค่าถูกใน DB แต่พฤติกรรมผิด" ให้ `grep` หาว่า **ใครเรียกฟังก์ชันนั้นบ้าง** ก่อนเดาว่ามันทำงานล้มเหลว
+    - **ยิง API ภายนอกทุกจุดต้องใส่ `muteHttpExceptions: true` แล้ว log ผลลัพธ์** — โค้ดที่ throw แล้วถูก catch กลืนคือที่มาของบั๊กที่หายากที่สุดในโปรเจกต์นี้
+12. **Preferences ผู้ใช้:** ตอบกระชับตรงประเด็น · ภาษาไทยเป็นหลักผสมศัพท์เทคนิคอังกฤษ · step-by-step สำหรับงานที่ต้องทำมือ · แก้ไฟล์ตรงๆ ไม่ต้องโชว์ diff ก่อน · ชอบให้ทำเป็นสคริปต์มากกว่าให้แก้มือ
+13. **GitHub:** `https://github.com/bornja55/Durain.git` branch `main` — commit ล่าสุด `9821582`
 
 ## How to resume
-ถามผู้ใช้ว่า deploy 6 ไฟล์ (`Code.gs`, `SheetOperations.gs`, `LineAPI.gs`, `TestSwitch.gs`, `Dashboard.js.html`, `TreeInfo.html`) แล้วทดสอบตาม `docs/QA_CHECKLIST.md` ถึงข้อไหน โดยเฉพาะ 2 บั๊กล่าสุด (รูปในหน้าต้นไม้ขึ้นหรือยัง / ปุ่มเปิดแชทค้างอีกไหม — ถ้ายังค้าง ให้ถามว่าปุ่ม "คัดลอกคำสั่ง" ใช้ได้ไหม เพื่อแยกว่าเป็นข้อจำกัด WebView หรือแก้ได้อีก) เมื่อผ่านหมดแล้วช่วยผู้ใช้ commit + push ขึ้น `https://github.com/bornja55/Durain.git`
+
+ถามผู้ใช้ว่า **deploy ถึงขั้นไหนแล้ว** โดยเฉพาะ 3 อย่างนี้ตามลำดับ:
+
+1. รัน `migrateToSaleRounds()` แล้วหรือยัง (ต้องทำก่อน deploy โค้ดชุดที่ 2 ไม่งั้นรหัสรอบจะลงคอลัมน์ผิด)
+2. วางไฟล์ครบแล้วหรือยัง — ชุดที่ 2 คือ `Code.gs`, `SheetOperations.gs`, `FlexMessages.gs`, `PushScheduler.gs`, `DatabaseSetup.gs`
+3. ทดสอบตาม `docs/QA_CHECKLIST.md` ถึงข้อไหน — ที่ยังไม่รู้ผลเลยคือ **ทุกข้อ** โดยเฉพาะปุ่มเปิดแชท (`target="_top"` จะรอด iframe ไหม) และ flow เก็บเกี่ยว/ขายใหม่ทั้งหมด
+
+ถ้าผู้ใช้ยังไม่ได้เริ่ม ให้เริ่มจากข้อ 1 แล้วไล่ไปทีละขั้น ถ้าเจอบั๊กให้ใช้ `debug-mantra` และ **ไล่ว่าใครเรียกฟังก์ชันนั้นบ้างก่อนเดาว่ามันพัง**

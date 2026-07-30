@@ -77,11 +77,23 @@ function buildTreeInfoFlex(treeInfo, remaining, harvestHistory) {
         }
       ];
 
-      if (h.reason === 'ตัดขาย') {
+      // น้ำหนักคือข้อมูลหลักของการตัดขายในโมเดลใหม่ (คนสวนชั่งทีละต้น)
+      if (h.weight) {
+        historyBody[3].contents.push({
+          type: 'box', layout: 'horizontal', contents: [
+            { type: 'text', text: 'น้ำหนัก', color: '#888888', size: 'sm', flex: 3 },
+            { type: 'text', text: `${h.weight} กก.`, size: 'sm', flex: 5, weight: 'bold' }
+          ]
+        });
+      }
+
+      // เกรดมีเฉพาะข้อมูลรุ่นเก่า — แถวใหม่เกรดอยู่ในชีต "รอบขาย" ระดับวัน
+      // ไม่ใช่ระดับต้น (เทรวมกองแล้วคัด ตามกลับไม่ได้) จึงแสดงเฉพาะที่มีจริง
+      if (h.reason === 'ตัดขาย' && h.grade && h.grade !== '-') {
         historyBody[3].contents.push({
           type: 'box', layout: 'horizontal', contents: [
             { type: 'text', text: 'เกรด', color: '#888888', size: 'sm', flex: 3 },
-            { type: 'text', text: h.grade || '-', size: 'sm', flex: 5 }
+            { type: 'text', text: h.grade, size: 'sm', flex: 5 }
           ]
         });
       }
@@ -205,26 +217,10 @@ function buildHarvestReasonFlex(treeId) {
   };
 }
 
-function buildGradeSelectionFlex() {
-  return {
-    type: 'flex',
-    altText: 'เลือกเกรด',
-    contents: {
-      type: 'bubble',
-      body: {
-        type: 'box',
-        layout: 'vertical',
-        contents: [
-          { type: 'text', text: 'เลือกเกรดผลผลิต', weight: 'bold', size: 'lg' },
-          { type: 'button', style: 'primary', margin: 'md', color: '#1DB446', action: { type: 'postback', label: 'เกรด A', data: `action=GRADE&grade=A` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'เกรด B', data: `action=GRADE&grade=B` } },
-          { type: 'button', style: 'primary', margin: 'sm', color: '#1DB446', action: { type: 'postback', label: 'เกรด C', data: `action=GRADE&grade=C` } },
-          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ตกไซซ์', data: `action=GRADE&grade=ตกไซซ์` } }
-        ]
-      }
-    }
-  };
-}
+// buildGradeSelectionFlex() ถูกลบออกแล้ว (2026-07-27)
+// เดิมใช้ถามเกรดตอนคนสวนตัด แต่ตอนตัดยังไม่รู้เกรด ต้องเทรวมกองแล้วคัดขายก่อน
+// เกรดจึงย้ายไปถามตอนบันทึกการขายรายวันแทน (ดู buildSaleRoundPromptFlex)
+// ตัว handler `action=GRADE` ยังคงไว้ใน Code.gs เพื่อตอบปุ่มเก่าที่ค้างในแชท
 
 function buildVarietySelectionFlex() {
   const createRow = (v1, v2) => ({
@@ -295,13 +291,13 @@ function buildHarvestSummaryFlex(data) {
         type: 'box',
         layout: 'vertical',
         contents: [
+          // ไม่มีเกรด/ราคาแล้ว — ตอนตัดยังไม่รู้ ต้องเทรวมกองแล้วคัดเกรดขายอีกที
+          // เจ้าของจะบันทึกเกรด/ราคาทีเดียวตอนปิดยอดขายของวัน
           { type: 'text', text: 'ยืนยันการบันทึก', weight: 'bold', size: 'lg' },
           { type: 'text', text: `รหัสต้น: ${data.treeId}`, margin: 'md' },
-          { type: 'text', text: `จำนวน: ${data.quantity} ลูก` },
           { type: 'text', text: `เหตุผล: ${data.reason}` },
-          { type: 'text', text: `เกรด: ${data.grade || '-'}` },
-          { type: 'text', text: `น้ำหนัก: ${data.weight || '-'} กก.` },
-          { type: 'text', text: `ราคา: ${data.price || '-'} บาท/กก.` }
+          { type: 'text', text: `จำนวน: ${data.quantity} ลูก` },
+          { type: 'text', text: `น้ำหนัก: ${data.weight ? data.weight + ' กก.' : '- (ไม่ได้ชั่ง)'}` }
         ]
       },
       footer: {
@@ -313,6 +309,179 @@ function buildHarvestSummaryFlex(data) {
         ]
       }
     }
+  };
+}
+
+// ==========================================
+// บันทึกการขายรายวัน (รอบขาย)
+// ==========================================
+
+/** หน้าแรก: สรุปยอดที่ตัดได้ของวัน + ขอให้กรอกเกรด/น้ำหนัก/ราคา */
+function buildSaleRoundPromptFlex(summary, existing) {
+  const lines = [
+    { type: 'text', text: '📦 บันทึกการขาย', weight: 'bold', size: 'lg' },
+    { type: 'text', text: 'วันที่ ' + formatRoundIdAsDate(summary.roundId), size: 'sm', color: '#79747E', margin: 'sm' },
+    { type: 'separator', margin: 'md' },
+    { type: 'text', text: `ตัดได้ ${summary.treeCount} ต้น · ${summary.totalCount} ลูก`, margin: 'md' },
+    { type: 'text', text: `น้ำหนักรวมจากสวน: ${summary.totalWeight} กก.`, weight: 'bold' }
+  ];
+
+  if (summary.damagedCount > 0) {
+    lines.push({ type: 'text', text: `(ผลเสียหาย ${summary.damagedCount} ลูก ไม่นับในการขาย)`, size: 'xs', color: '#B3261E' });
+  }
+  if (existing && existing.grades.length > 0) {
+    lines.push({ type: 'separator', margin: 'md' });
+    lines.push({ type: 'text', text: '⚠️ วันนี้บันทึกขายไว้แล้ว ' + existing.revenue.toLocaleString('th-TH') + ' บาท\nถ้าบันทึกใหม่จะทับของเดิม', size: 'xs', color: '#F9A825', wrap: true, margin: 'md' });
+  }
+
+  lines.push({ type: 'separator', margin: 'md' });
+  lines.push({
+    type: 'text', wrap: true, margin: 'md', size: 'sm',
+    text: 'พิมพ์ผลการคัดเกรด บรรทัดละ 1 เกรด:\nเกรด น้ำหนัก ราคา/กก.\n\nตัวอย่าง:\nA 60 130\nB 40 90\nC 20 50'
+  });
+
+  return {
+    type: 'flex',
+    altText: 'บันทึกการขาย ' + formatRoundIdAsDate(summary.roundId),
+    contents: { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: lines } }
+  };
+}
+
+/** ยืนยันก่อนบันทึก — โชว์รวมเงินให้เห็นก่อนกด */
+function buildSaleRoundConfirmFlex(roundId, grades) {
+  let totalRevenue = 0, totalWeight = 0;
+  const rows = grades.map(function (g) {
+    const amount = g.weight * g.price;
+    totalRevenue += amount;
+    totalWeight += g.weight;
+    return {
+      type: 'box', layout: 'horizontal', margin: 'sm',
+      contents: [
+        { type: 'text', text: 'เกรด ' + g.grade, size: 'sm', flex: 3 },
+        { type: 'text', text: g.weight + ' กก.', size: 'sm', flex: 3, align: 'end' },
+        { type: 'text', text: '× ' + g.price, size: 'sm', flex: 3, align: 'end', color: '#79747E' },
+        { type: 'text', text: amount.toLocaleString('th-TH'), size: 'sm', flex: 4, align: 'end', weight: 'bold' }
+      ]
+    };
+  });
+
+  return {
+    type: 'flex',
+    altText: 'ยืนยันการขาย',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: 'ยืนยันการขาย', weight: 'bold', size: 'lg' },
+          { type: 'text', text: 'วันที่ ' + formatRoundIdAsDate(roundId), size: 'sm', color: '#79747E' },
+          { type: 'separator', margin: 'md' }
+        ].concat(rows).concat([
+          { type: 'separator', margin: 'md' },
+          {
+            type: 'box', layout: 'horizontal', margin: 'md',
+            contents: [
+              { type: 'text', text: 'รวม ' + totalWeight + ' กก.', size: 'sm', flex: 5 },
+              { type: 'text', text: totalRevenue.toLocaleString('th-TH') + ' บาท', weight: 'bold', size: 'md', flex: 5, align: 'end', color: '#7CB342' }
+            ]
+          }
+        ])
+      },
+      footer: {
+        type: 'box', layout: 'horizontal',
+        contents: [
+          { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: 'ยืนยัน', data: 'action=SALE_CONFIRM' } },
+          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ยกเลิก', data: 'action=CANCEL' } }
+        ]
+      }
+    }
+  };
+}
+
+/** บันทึกเสร็จ — โชว์รายได้เฉลี่ยต่อ กก. ให้เห็นภาพ */
+function buildSaleRoundSavedFlex(roundId, result, summary) {
+  const avgPerKg = summary.totalWeight > 0 ? Math.round(result.totalRevenue / summary.totalWeight) : 0;
+  return {
+    type: 'flex',
+    altText: 'บันทึกการขายเรียบร้อย',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: '✅ บันทึกการขายเรียบร้อย', weight: 'bold', size: 'lg', color: '#1DB446', wrap: true },
+          { type: 'text', text: 'วันที่ ' + formatRoundIdAsDate(roundId), size: 'sm', color: '#79747E', margin: 'sm' },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: 'รายได้รวม ' + result.totalRevenue.toLocaleString('th-TH') + ' บาท', weight: 'bold', margin: 'md' },
+          { type: 'text', text: 'น้ำหนักที่ขาย ' + result.totalWeight + ' กก.', size: 'sm' },
+          { type: 'text', text: 'เฉลี่ย ' + avgPerKg.toLocaleString('th-TH') + ' บาท/กก.', size: 'sm', color: '#79747E' },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: `ระบบเฉลี่ยรายได้กลับไปให้ ${summary.treeCount} ต้นที่ตัดวันนี้แล้ว (ตามสัดส่วนน้ำหนัก)`, size: 'xs', color: '#79747E', wrap: true, margin: 'md' }
+        ]
+      }
+    }
+  };
+}
+
+/**
+ * คนสวน (หรือ role ที่ไม่ใช่เจ้าของ/admin) เปิด "บันทึกการขาย" ของรอบที่ตัวเอง
+ * ส่งไปแล้วยังค้างอยู่ (รออนุมัติ หรือ ถูกส่งกลับแก้ไข) — โชว์สถานะแทนให้กรอกซ้ำ
+ */
+function buildSalePendingExistsFlex(roundId, pending, daysBack) {
+  const isReturned = pending.status === 'ส่งกลับแก้ไข';
+  const statusText = isReturned
+    ? '⚠️ เจ้าของขอให้แก้ไข: ' + (pending.note || '-')
+    : '⏳ ส่งไปแล้ว รอเจ้าของอนุมัติ';
+  const grades = (pending.data && pending.data.grades) || [];
+  const gradeLines = grades.map(function (g) {
+    return `เกรด ${g.grade}: ${g.weight} กก. × ${g.price}`;
+  }).join('\n');
+
+  return {
+    type: 'flex',
+    altText: 'มีรายการขายค้างอยู่ ' + formatRoundIdAsDate(roundId),
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box', layout: 'vertical',
+        contents: [
+          { type: 'text', text: '📦 มีรายการขายค้างอยู่แล้ว', weight: 'bold', size: 'lg', wrap: true },
+          { type: 'text', text: 'วันที่ ' + formatRoundIdAsDate(roundId), size: 'sm', color: '#79747E', margin: 'sm' },
+          { type: 'separator', margin: 'md' },
+          { type: 'text', text: statusText, wrap: true, margin: 'md', color: isReturned ? '#B3261E' : '#79747E' },
+          { type: 'text', text: gradeLines || '-', wrap: true, size: 'sm', margin: 'md' }
+        ]
+      },
+      footer: {
+        type: 'box', layout: 'horizontal',
+        contents: [
+          { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: 'แก้ไขรายการ', data: `action=SALE_ROUND&edit=1&days=${daysBack}` } },
+          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ยกเลิก', data: `action=SALE_CANCEL_PENDING&id=${pending.id}` } }
+        ]
+      }
+    }
+  };
+}
+
+/** คนสวนส่งรายการขายเข้าคิวสำเร็จ — ย้ำชัดว่ายังไม่ใช่รายได้จริงจนกว่าเจ้าของจะอนุมัติ */
+function buildSaleQueuedFlex(roundId, grades, buyer) {
+  let totalRevenue = 0, totalWeight = 0;
+  grades.forEach(function (g) { totalRevenue += g.weight * g.price; totalWeight += g.weight; });
+
+  const lines = [
+    { type: 'text', text: '📤 ส่งรายการขายให้เจ้าของอนุมัติแล้ว', weight: 'bold', size: 'lg', color: '#F9A825', wrap: true },
+    { type: 'text', text: 'วันที่ ' + formatRoundIdAsDate(roundId), size: 'sm', color: '#79747E', margin: 'sm' },
+    { type: 'separator', margin: 'md' },
+    { type: 'text', text: 'รวม ' + totalWeight + ' กก. ประมาณ ' + totalRevenue.toLocaleString('th-TH') + ' บาท', weight: 'bold', margin: 'md' }
+  ];
+  if (buyer) lines.push({ type: 'text', text: 'ผู้ซื้อ: ' + buyer, size: 'sm', color: '#79747E' });
+  lines.push({ type: 'separator', margin: 'md' });
+  lines.push({ type: 'text', text: 'ยังไม่มีผลจนกว่าเจ้าของจะกดอนุมัติ — พิมพ์ "บันทึกการขาย" อีกครั้งถ้าอยากแก้ไขหรือยกเลิกรายการนี้', size: 'xs', color: '#79747E', wrap: true, margin: 'md' });
+
+  return {
+    type: 'flex',
+    altText: 'ส่งรายการขายรออนุมัติแล้ว',
+    contents: { type: 'bubble', body: { type: 'box', layout: 'vertical', contents: lines } }
   };
 }
 
@@ -372,18 +541,38 @@ function buildTreeRegistrationSummaryFlex(data) {
   };
 }
 
+/**
+ * แปลง JSON ในคิวรออนุมัติเป็นข้อความให้เจ้าของอ่านก่อนกดอนุมัติ
+ *
+ * เรียงตามลำดับที่คนอ่านต้องการเห็น: เหตุผล -> จำนวน -> น้ำหนัก
+ * (น้ำหนักสำคัญขึ้นในโมเดลใหม่ เพราะเป็นฐานที่ใช้เฉลี่ยรายได้กลับไปหาต้น)
+ *
+ * `grade`/`price` ยังเช็คไว้เผื่อรายการเก่าที่ค้างในคิวข้ามการ deploy
+ * แต่รายการใหม่จะไม่มี 2 ฟิลด์นี้แล้ว — เกรด/ราคาบันทึกตอนปิดยอดขายรายวัน
+ */
 function formatPendingData(jsonString) {
   try {
     const data = JSON.parse(jsonString);
     let result = '';
+    if (data.reason) result += `สาเหตุ: ${data.reason}\n`;
     if (data.variety) result += `พันธุ์: ${data.variety}\n`;
     if (data.age) result += `อายุ: ${data.age} ปี\n`;
     if (data.flowerMonth) result += `เดือนออกดอก: ${data.flowerMonth}\n`;
     if (data.fruitCount) result += `จำนวน: ${data.fruitCount}\n`;
-    if (data.quantity) result += `จำนวน(ดอก/ลูก): ${data.quantity}\n`;
-    if (data.grade) result += `เกรด: ${data.grade}\n`;
+    if (data.quantity) result += `จำนวน: ${data.quantity} ลูก\n`;
     if (data.weight) result += `น้ำหนัก: ${data.weight} กก.\n`;
-    if (data.reason) result += `สาเหตุ: ${data.reason}\n`;
+    if (data.roundId) result += `รอบวันที่: ${formatRoundIdAsDate(data.roundId)}\n`;
+    // ---- เฉพาะรายการประเภท 'บันทึกขาย' (คนสวนส่งเข้าคิวรออนุมัติ) ----
+    if (data.grades && data.grades.length) {
+      result += 'เกรดที่กรอก:\n';
+      data.grades.forEach(function (g) {
+        result += `  ${g.grade}: ${g.weight} กก. × ${g.price} บาท/กก.\n`;
+      });
+    }
+    if (data.buyer) result += `ผู้ซื้อ: ${data.buyer}\n`;
+    // ---- เฉพาะรายการรุ่นเก่าที่ยังค้างในคิว ----
+    if (data.grade) result += `เกรด: ${data.grade}\n`;
+    if (data.price) result += `ราคา: ${data.price} บาท/กก.\n`;
     return result.trim() || '-';
   } catch(e) {
     return '-';
@@ -401,7 +590,23 @@ function buildApprovalCarouselFlex(items) {
         dateString = requestDate.toString();
       }
     }
-    
+
+    // รายการประเภท 'บันทึกขาย' เก็บ roundId ไว้ในคอลัมน์ 'รหัสต้น' (คนละความหมาย
+    // กับรายการอื่นที่เก็บรหัสต้นไม้จริง) โชว์เป็นวันที่ให้อ่านง่ายแทน
+    const isSale = item['ประเภท'] === 'บันทึกขาย';
+    const keyLabel = isSale ? 'รอบวันที่' : 'รหัสต้น';
+    const keyValue = isSale ? formatRoundIdAsDate(item['รหัสต้น']) : item['รหัสต้น'];
+
+    const footerButtons = [
+      { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: 'อนุมัติ', data: `action=APPROVE&id=${item.ID}` } }
+    ];
+    // "ส่งกลับแก้ไข" มีความหมายเฉพาะรายการขาย (ผู้ส่งแก้ตัวเลขแล้ว submit ซ้ำได้)
+    // รายการอื่น (ตัดจำหน่าย/ลงทะเบียน) ยังใช้แค่ อนุมัติ/ปฏิเสธ เหมือนเดิม
+    if (isSale) {
+      footerButtons.push({ type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ส่งกลับแก้ไข', data: `action=RETURN_START&id=${item.ID}` } });
+    }
+    footerButtons.push({ type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ปฏิเสธ', data: `action=REJECT_START&id=${item.ID}` } });
+
     const bubble = {
       type: 'bubble',
       body: {
@@ -409,7 +614,7 @@ function buildApprovalCarouselFlex(items) {
         layout: 'vertical',
         contents: [
           { type: 'text', text: `ประเภท: ${item['ประเภท']}`, weight: 'bold', size: 'md' },
-          { type: 'text', text: `รหัสต้น: ${item['รหัสต้น']}` },
+          { type: 'text', text: `${keyLabel}: ${keyValue}` },
           { type: 'text', text: `ผู้บันทึก: ${item['บันทึกโดย']}` },
           { type: 'text', text: `วันที่ขอ: ${dateString}`, size: 'xs', color: '#888888' },
           { type: 'text', text: `รายละเอียด:\n${formatPendingData(item['ข้อมูล JSON'])}`, wrap: true, size: 'xs', margin: 'sm' }
@@ -418,15 +623,15 @@ function buildApprovalCarouselFlex(items) {
       footer: {
         type: 'box',
         layout: 'horizontal',
-        contents: [
-          { type: 'button', style: 'primary', color: '#1DB446', action: { type: 'postback', label: 'อนุมัติ', data: `action=APPROVE&id=${item.ID}` } },
-          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'ปฏิเสธ', data: `action=REJECT_START&id=${item.ID}` } }
-        ]
+        contents: footerButtons
       }
     };
-    
-    if (item['รูปภาพ']) {
-      const imgUrl = item['รูปภาพ'].split(',')[0].trim();
+
+    // BUG FIX (พบระหว่างแก้จุดนี้): header จริงของคอลัมน์รูปในชีต 'คิวรออนุมัติ'
+    // คือ 'รูปถ่าย URL' (ดู DatabaseSetup.gs) แต่โค้ดเดิมเช็ค item['รูปภาพ'] ซึ่ง
+    // ไม่ตรงกับ header ไหนเลย -> รูป hero การ์ดอนุมัติไม่เคยขึ้นเลยตั้งแต่แรก
+    if (item['รูปถ่าย URL']) {
+      const imgUrl = item['รูปถ่าย URL'].split(',')[0].trim();
       if (imgUrl.startsWith('http')) {
         bubble.hero = {
           type: 'image',
@@ -437,7 +642,7 @@ function buildApprovalCarouselFlex(items) {
         };
       }
     }
-    
+
     return bubble;
   });
 
@@ -464,20 +669,78 @@ function buildDashboardMenuFlex() {
           { type: 'text', text: 'เลือกรายงาน', weight: 'bold', size: 'lg' },
           { type: 'button', style: 'primary', margin: 'md', color: '#1DB446', action: { type: 'postback', label: 'สรุปภาพรวม', data: `action=DASHBOARD_VIEW&type=total` } },
           { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'แยกตามสายพันธุ์', data: `action=DASHBOARD_VIEW&type=variety` } },
-          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'แยกตามเกรด', data: `action=DASHBOARD_VIEW&type=grade` } }
+          { type: 'button', style: 'secondary', margin: 'sm', action: { type: 'postback', label: 'แยกตามเกรด', data: `action=DASHBOARD_VIEW&type=grade` } },
+          // "บันทึกการขายวันนี้" ย้ายขึ้นไปเป็นปุ่มหลักบน Rich Menu แล้ว จึงไม่ซ้ำที่นี่
+          // เหลือไว้เฉพาะ "เมื่อวาน" ซึ่งใช้นานๆ ครั้ง ไม่คุ้มกินช่องบน Rich Menu
+          { type: 'separator', margin: 'lg' },
+          { type: 'button', style: 'link', margin: 'sm', height: 'sm', action: { type: 'postback', label: '📦 บันทึกการขายของเมื่อวาน', data: `action=SALE_ROUND&days=1` } }
         ]
       }
     }
   };
 }
 
-function buildDashboardResultFlex(title, data) {
+/**
+ * การ์ด "ระบบจัดการ" — ประตูเข้าเว็บ Dashboard แยกตามแท็บ
+ *
+ * ทำเป็นการ์ดแทนที่จะเป็นปุ่มบน Rich Menu หลายปุ่ม เพราะ:
+ *   1) Rich Menu มีช่องจำกัด และการเพิ่มปุ่มต้องทำรูปใหม่ทั้งใบทุกครั้ง
+ *   2) เพิ่มแท็บใหม่ในอนาคตแค่เพิ่มปุ่มตรงนี้ ไม่ต้องยุ่งกับรูปเลย
+ *
+ * ต้องส่ง webAppUrl เข้ามา (ScriptApp.getService().getUrl()) เพราะ FlexMessages
+ * ไม่ควรไปเรียก service เอง — ให้ผู้เรียกที่รู้ context เป็นคนหามา
+ */
+function buildManageMenuFlex(webAppUrl) {
+  const link = function (tab) { return webAppUrl + '?page=dashboard&tab=' + tab; };
+
+  const items = [
+    { label: '🌳 จัดการต้นไม้', tab: 'trees' },
+    { label: '💰 รายได้', tab: 'income' },
+    { label: '🗺️ แผนที่สวน', tab: 'map' },
+    { label: '📋 รายการรออนุมัติ', tab: 'pending' },
+    { label: '👥 ผู้ใช้งาน', tab: 'users' }
+  ];
+
+  return {
+    type: 'flex',
+    altText: 'ระบบจัดการ',
+    contents: {
+      type: 'bubble',
+      body: {
+        type: 'box',
+        layout: 'vertical',
+        contents: [
+          { type: 'text', text: '⚙️ ระบบจัดการ', weight: 'bold', size: 'lg' },
+          { type: 'text', text: 'เปิดหน้าเว็บไปที่หัวข้อที่ต้องการ', size: 'xs', color: '#79747E', margin: 'sm' },
+          { type: 'separator', margin: 'md' }
+        ].concat(items.map(function (it, i) {
+          return {
+            type: 'button',
+            style: i === 0 ? 'primary' : 'secondary',
+            color: i === 0 ? '#7CB342' : undefined,
+            margin: i === 0 ? 'md' : 'sm',
+            action: { type: 'uri', label: it.label, uri: link(it.tab) }
+          };
+        }))
+      }
+    }
+  };
+}
+
+/**
+ * @param {string} unit หน่วยที่ต่อท้ายตัวเลข เช่น 'ลูก' หรือ 'กก.'
+ *                      เว้นว่างสำหรับ "สรุปภาพรวม" ที่มีหน่วยติดมากับค่าอยู่แล้ว
+ */
+function buildDashboardResultFlex(title, data, unit) {
   const contents = [
     { type: 'text', text: title, weight: 'bold', size: 'lg' }
   ];
   
   for (const [key, value] of Object.entries(data)) {
-    contents.push({ type: 'text', text: `${key}: ${value}`, margin: 'sm' });
+    // ใส่หน่วยกำกับ เพราะ "สรุปตามเกรด" เปลี่ยนจากนับลูกเป็นชั่ง กก. แล้ว
+    // (เกรดมาจากผลคัดจริงตอนขาย ซึ่งชั่งเป็นกิโล ไม่ได้นับลูก)
+    const suffix = (unit && key !== 'ยังไม่มีข้อมูล') ? ' ' + unit : '';
+    contents.push({ type: 'text', text: `${key}: ${value}${suffix}`, margin: 'sm' });
   }
 
   return {

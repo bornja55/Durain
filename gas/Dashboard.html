@@ -652,7 +652,8 @@
               <div>
                 <p class="text-xs font-medium text-slate-400">ผลผลิตเก็บเกี่ยว</p>
                 <p class="text-xl font-bold text-slate-900"><span id="detailTreeTotalYield">-</span> <span
-                    class="text-sm font-normal text-slate-500">ลูก</span></p>
+                    class="text-sm font-normal text-slate-500">ลูก</span> <span id="detailTreeTotalWeight"
+                    class="text-sm font-normal text-slate-500"></span></p>
               </div>
             </div>
             <div class="bg-white p-4 rounded-xl shadow-sm border border-gray-100 flex flex-col gap-3">
@@ -746,12 +747,14 @@
         class="absolute left-2 sm:left-4 top-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 items-center justify-center active:scale-95">
         <span class="material-symbols-rounded text-white text-2xl">chevron_left</span>
       </button>
-      <img id="lightboxImg" src="" class="max-w-full max-h-full object-contain rounded-lg" onclick="event.stopPropagation()">
+      <img id="lightboxImg" src="" class="max-w-full max-h-full object-contain rounded-lg"
+        onclick="event.stopPropagation()">
       <button id="lightboxNext" onclick="navigateLightbox(1)" type="button"
         class="absolute right-2 sm:right-4 top-1/2 -translate-y-1/2 z-10 w-11 h-11 rounded-full bg-white/10 hover:bg-white/20 items-center justify-center active:scale-95">
         <span class="material-symbols-rounded text-white text-2xl">chevron_right</span>
       </button>
-      <div id="lightboxCounter" class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm font-medium"></div>
+      <div id="lightboxCounter" class="absolute bottom-4 left-1/2 -translate-x-1/2 text-white/80 text-sm font-medium">
+      </div>
     </div>
 
     <!-- QR Code Modal -->
@@ -898,6 +901,8 @@
     const SERVER_SESSION_TOKEN = <?!= sessionTokenJson ?>;
     const SERVER_LOGIN_ERROR = <?!= loginErrorJson ?>;
     const LINE_LOGIN_URL = <?!= loginUrlJson ?>;
+    // แท็บที่ต้องเปิดตอนเข้ามา (deep-link) — server ตรวจ whitelist มาแล้ว
+    const INITIAL_TAB = <?!= initialTabJson ?>;
 
     // Handle Greeting
     const hour = new Date().getHours();

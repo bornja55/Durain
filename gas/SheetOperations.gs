@@ -96,6 +96,429 @@ function getActiveSeason() {
   return getConfig('ACTIVE_SEASON');
 }
 
+// ==========================================
+// รอบเก็บเกี่ยว/ขาย (Harvest Round)
+// ==========================================
+// หน้าสวนทำงานแบบ "ตัดวันไหน ขายวันนั้น" -> 1 รอบ = 1 วัน เสมอ
+// รหัสรอบจึงสร้างจากวันที่ตรงๆ ไม่ต้องมีปุ่มเปิด/ปิดรอบ ไม่ต้องเก็บ state
+// ว่ารอบไหนเปิดอยู่ และไม่มี race condition ตอนหลายคนบันทึกพร้อมกัน
+//
+// เหตุผลที่แยกการเก็บเกี่ยวออกจากการขาย:
+// คนสวนชั่งทีละต้น (รู้ treeId + น้ำหนัก + จำนวนลูก) แต่ยังไม่รู้เกรด/ราคา
+// เพราะต้องเอาทุกต้นมาเทรวมกองแล้วคัดเกรดขายอีกที -> พอเทรวมแล้ว
+// "ทุเรียนเกรด A มาจากต้นไหน" ไม่มีทางรู้ ดังนั้นเกรด/ราคาต้องอยู่คนละตาราง
+// ดูรายละเอียดเต็มที่ docs/DESIGN_harvest_lot.md
+// ==========================================
+
+const SALE_ROUND_SHEET = 'รอบขาย';
+
+/** คอลัมน์ "รอบที่" ในชีตการเก็บเกี่ยว (index 14 = คอลัมน์ O) — เพิ่มต่อท้ายของเดิม */
+const HARVEST_ROUND_COL = 14;
+
+/**
+ * รหัสรอบจากวันที่ เช่น 27 ก.ค. 2026 -> 'H-25680727' (พ.ศ. + MMDD)
+ * ใช้ timezone ไทยเสมอ ไม่งั้นรายการช่วงดึกจะตกไปอยู่รอบวันก่อนหน้า
+ */
+function getHarvestRoundId(date) {
+  const d = date ? new Date(date) : new Date();
+  if (isNaN(d)) return '';
+  const buddhistYear = Number(Utilities.formatDate(d, 'Asia/Bangkok', 'yyyy')) + 543;
+  return 'H-' + buddhistYear + Utilities.formatDate(d, 'Asia/Bangkok', 'MMdd');
+}
+
+/** แปลงรหัสรอบกลับเป็นข้อความวันที่อ่านง่าย 'H-25680727' -> '27/07/2568' */
+function formatRoundIdAsDate(roundId) {
+  const m = String(roundId || '').match(/^H-(\d{4})(\d{2})(\d{2})$/);
+  return m ? m[3] + '/' + m[2] + '/' + m[1] : String(roundId || '');
+}
+
+/**
+ * สรุปยอดตัดของรอบหนึ่ง (= ของวันหนึ่ง) แยกรายต้น
+ * รวมหลายตะกร้าของต้นเดียวกันให้อัตโนมัติ — คนสวนสแกนซ้ำได้ไม่ต้องคิดเลขเอง
+ * นับเฉพาะ 'ตัดขาย' ในยอดที่ใช้เฉลี่ยรายได้ ส่วน 'เสียหาย' แยกไว้ต่างหาก
+ */
+function getHarvestRoundSummary(roundId) {
+  const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  const empty = { roundId: roundId, trees: [], totalWeight: 0, totalCount: 0, treeCount: 0, damagedCount: 0 };
+  if (!sheet || !roundId) return empty;
+
+  const data = sheet.getDataRange().getValues();
+  const byTree = {};
+  let totalWeight = 0, totalCount = 0, damagedCount = 0;
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][HARVEST_ROUND_COL] || '').trim() !== String(roundId).trim()) continue;
+
+    const treeId = String(data[i][2] || '').trim();
+    const count = Number(data[i][3]) || 0;
+    const weight = Number(data[i][6]) || 0;
+    const reason = String(data[i][4] || '').trim();
+
+    // 'เสียหาย' ไม่ได้ขาย จึงต้องไม่เข้าไปในฐานที่ใช้เฉลี่ยรายได้
+    if (reason !== 'ตัดขาย') { damagedCount += count; continue; }
+
+    if (!byTree[treeId]) byTree[treeId] = { treeId: treeId, weight: 0, count: 0, entries: 0 };
+    byTree[treeId].weight += weight;
+    byTree[treeId].count += count;
+    byTree[treeId].entries++;
+    totalWeight += weight;
+    totalCount += count;
+  }
+
+  const trees = Object.keys(byTree).map(function (k) { return byTree[k]; });
+  return {
+    roundId: roundId,
+    trees: trees,
+    totalWeight: totalWeight,
+    totalCount: totalCount,
+    treeCount: trees.length,
+    damagedCount: damagedCount
+  };
+}
+
+/** ยอดสะสมของต้นหนึ่งในรอบ (ใช้ตอบคนสวนว่า "ต้นนี้วันนี้รวมแล้วเท่าไหร่") */
+function getTreeRoundTotal(roundId, treeId) {
+  const summary = getHarvestRoundSummary(roundId);
+  const found = summary.trees.filter(function (t) {
+    return String(t.treeId).trim() === String(treeId).trim();
+  })[0];
+  return found || { treeId: treeId, weight: 0, count: 0, entries: 0 };
+}
+
+/**
+ * บันทึกการขายของรอบ — 1 แถวต่อ 1 เกรด
+ * grades: [{ grade: 'A', weight: 60, price: 130 }, ...]
+ * เขียนใหม่ทับของเดิมทั้งรอบ (ลบแถวเก่าของรอบนี้ก่อน) เพื่อให้แก้ไขซ้ำได้
+ * โดยไม่เกิดข้อมูลซ้อน — เจ้าของกรอกผิดแล้วกรอกใหม่ได้เลย
+ */
+function saveSaleRound(roundId, grades, buyer, recorderName) {
+  if (!roundId) throw new Error('ไม่ได้ระบุรอบ');
+  if (!grades || !grades.length) throw new Error('ต้องระบุอย่างน้อย 1 เกรด');
+
+  return withScriptLock(function () {
+    return saveSaleRoundUnlocked_(roundId, grades, buyer, recorderName);
+  });
+}
+
+/**
+ * แกนจริงของการบันทึกรอบขาย — "ไม่มี" lock ในตัวเอง เพราะถูกเรียกจาก 2 ทาง:
+ *   1) saveSaleRound() (ห่อ lock เอง) — เจ้าของ/admin บันทึกทันที ไม่ต้องรออนุมัติ
+ *   2) approveItem() (ห่อ lock ทั้งฟังก์ชันอยู่แล้ว) — ตอนอนุมัติรายการขาย
+ *      ที่คนสวนส่งเข้าคิวมา
+ * lock ของ GAS ไม่ reentrant — ถ้า approveItem() เรียก saveSaleRound() ตรงๆ
+ * จะติด waitLock ค้างจนหมดเวลาแล้ว throw จึงต้องแยกแกนที่ไม่ล็อกออกมาแบบนี้
+ */
+function saveSaleRoundUnlocked_(roundId, grades, buyer, recorderName) {
+  const ss = SheetRepository.getSpreadsheet();
+  let sheet = ss.getSheetByName(SALE_ROUND_SHEET);
+  if (!sheet) {
+    sheet = ss.insertSheet(SALE_ROUND_SHEET);
+    sheet.getRange(1, 1, 1, 9).setValues([[
+      'รอบที่', 'วันที่ขาย', 'เกรด', 'น้ำหนัก(กก.)', 'ราคา/กก.',
+      'รวมเงิน', 'ผู้ซื้อ', 'บันทึกโดย', 'วันที่บันทึก'
+    ]]);
+    sheet.setFrozenRows(1);
+  }
+
+  // ลบแถวเดิมของรอบนี้ (ไล่จากล่างขึ้นบน ไม่งั้น index เลื่อน)
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (String(data[i][0] || '').trim() === String(roundId).trim()) sheet.deleteRow(i + 1);
+  }
+
+  const now = new Date();
+  const saleDate = formatRoundIdAsDate(roundId);
+  let totalRevenue = 0, totalWeight = 0;
+
+  grades.forEach(function (g) {
+    const weight = Number(g.weight) || 0;
+    const price = Number(g.price) || 0;
+    const amount = weight * price;
+    totalRevenue += amount;
+    totalWeight += weight;
+    sheet.appendRow([
+      roundId, saleDate, String(g.grade || '').trim(), weight, price,
+      amount, buyer || '', recorderName || '', now
+    ]);
+  });
+
+  return { roundId: roundId, totalRevenue: totalRevenue, totalWeight: totalWeight, rows: grades.length };
+}
+
+// ==========================================
+// คิวรออนุมัติสำหรับ "บันทึกขาย" ที่คนสวนส่งเข้ามา
+// ==========================================
+// เจ้าของ/admin ยังบันทึกทันทีเหมือนเดิมผ่าน saveSaleRound() ตรงๆ (ไม่ผ่านคิว)
+// ส่วนคนสวน (หรือ role อื่นที่ไม่ใช่เจ้าของ/admin) กรอกเกรด/น้ำหนัก/ราคาแล้ว
+// เข้าคิว 'คิวรออนุมัติ' รอเจ้าของกด "อนุมัติ" ก่อนถึงจะบันทึกลงชีต 'รอบขาย' จริง
+// ใช้ชีต 'คิวรออนุมัติ' เดิม ไม่เพิ่มชีตใหม่ — คอลัมน์ 'รหัสต้น' ใช้เก็บ roundId แทน
+// (รายการประเภทนี้ไม่มีต้นไม้เดี่ยวๆ ให้ผูก)
+//
+// สถานะที่เป็นไปได้ของรายการประเภท 'บันทึกขาย':
+//   รออนุมัติ    -> รอเจ้าของตัดสินใจ
+//   ส่งกลับแก้ไข -> เจ้าของขอให้แก้ตัวเลข คนสวนแก้แล้ว submit ซ้ำได้ (upsert ทับแถวเดิม)
+//   อนุมัติ      -> ผ่าน approveItem() บันทึกเข้า 'รอบขาย' แล้ว จบ
+//   ปฏิเสธ       -> เจ้าของไม่รับรายการนี้เลย จบ ไม่มี resubmit
+//   ยกเลิก       -> คนสวนยกเลิกเอง ก่อนเจ้าของกดอะไร
+
+/** หาแถว (1-based) ในชีตคิวที่เป็นรายการขายค้างอยู่ของรอบนี้ — ใช้ภายในไฟล์นี้เท่านั้น */
+function locatePendingSaleRow_(sheet, roundId) {
+  const data = sheet.getDataRange().getValues();
+  for (let i = data.length - 1; i >= 1; i--) {
+    if (data[i][1] !== 'บันทึกขาย') continue;
+    if (data[i][3] !== 'รออนุมัติ' && data[i][3] !== 'ส่งกลับแก้ไข') continue;
+    if (String(data[i][2] || '').trim() !== String(roundId).trim()) continue;
+    return { rowIndex: i + 1, row: data[i] };
+  }
+  return null;
+}
+
+/**
+ * เช็คว่ารอบนี้มีรายการขายค้างอยู่ในคิวไหม (รออนุมัติ หรือ ถูกส่งกลับแก้ไข)
+ * ใช้ตอนคนสวนเปิด flow "บันทึกการขาย" เพื่อโชว์สถานะเดิมแทนที่จะให้กรอกซ้ำ
+ * เป็นการอ่านล้วนๆ ไม่ล็อก — อ่านค่าเก่าไปหน่อยไม่เสียหาย (แค่ UI ไม่ทันข้อมูลล่าสุดชั่วครู่)
+ */
+function findPendingSaleItem(roundId) {
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+  if (!sheet || !roundId) return null;
+  const found = locatePendingSaleRow_(sheet, roundId);
+  if (!found) return null;
+  const row = found.row;
+  let itemData = {};
+  try { itemData = JSON.parse(row[4]); } catch (e) { /* ข้อมูลเสีย ถือว่าไม่มี */ }
+  return {
+    id: row[0],
+    status: row[3],
+    data: itemData,
+    recorderId: row[6],
+    recorderName: row[5],
+    note: row[8] || ''
+  };
+}
+
+/**
+ * บันทึก/แก้ไขรายการขายที่ยังรออนุมัติของรอบนี้ — upsert ในแถวเดียว
+ * (ไม่ append ซ้ำ) เพื่อกันคิวบวมและกันรายการซ้ำของรอบเดียวกันชนกัน
+ * ครอบทั้งการอ่านและเขียนด้วย lock เดียวกัน กัน race ตอนสองคนกด submit พร้อมกัน
+ * (จุดเดียวกับที่เคยพลาดไปแล้วใน approveItem — ดูหมายเหตุตรงนั้น)
+ */
+function upsertSalePendingItem(roundId, grades, buyer, userId, displayName) {
+  if (!roundId) throw new Error('ไม่ได้ระบุรอบ');
+  if (!grades || !grades.length) throw new Error('ต้องระบุอย่างน้อย 1 เกรด');
+
+  return withScriptLock(function () {
+    const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+    const now = new Date();
+    const payload = JSON.stringify({ roundId: roundId, grades: grades, buyer: buyer || '' });
+    const existing = locatePendingSaleRow_(sheet, roundId);
+
+    if (existing) {
+      sheet.getRange(existing.rowIndex, 4).setValue('รออนุมัติ');   // สถานะ
+      sheet.getRange(existing.rowIndex, 5).setValue(payload);       // ข้อมูล JSON
+      sheet.getRange(existing.rowIndex, 6).setValue(displayName);   // บันทึกโดย
+      sheet.getRange(existing.rowIndex, 7).setValue(userId);        // LINE UserID
+      sheet.getRange(existing.rowIndex, 8).setValue(now);           // วันที่บันทึก
+      sheet.getRange(existing.rowIndex, 9).setValue('');            // ล้างเหตุผลเดิม (ถ้าเคยถูกส่งกลับแก้ไข)
+      return { id: existing.row[0], updated: true };
+    }
+
+    const lastRow = sheet.getLastRow();
+    let nextId = 1;
+    if (lastRow > 1) {
+      const lastId = sheet.getRange(lastRow, 1).getValue();
+      if (!isNaN(lastId)) nextId = Number(lastId) + 1;
+    }
+    sheet.appendRow([nextId, 'บันทึกขาย', roundId, 'รออนุมัติ', payload, displayName, userId, now, '', '']);
+    return { id: nextId, updated: false };
+  });
+}
+
+/**
+ * คนสวนยกเลิกรายการขายที่ตัวเองส่งไปเอง ก่อนเจ้าของจะตัดสินใจ
+ * เช็ค LINE UserID ตรงกับคนส่งเดิมเท่านั้น — กันคนอื่นมายกเลิกรายการที่ไม่ใช่ของตัวเอง
+ */
+function cancelPendingItem(itemId, userId) {
+  return withScriptLock(function () {
+    const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) != String(itemId)) continue;
+      if (data[i][3] !== 'รออนุมัติ' && data[i][3] !== 'ส่งกลับแก้ไข') {
+        return { success: false, reason: 'รายการนี้ถูกดำเนินการไปแล้ว' };
+      }
+      if (String(data[i][6]).trim() !== String(userId).trim()) {
+        return { success: false, reason: 'ไม่ใช่รายการของคุณ' };
+      }
+      sheet.getRange(i + 1, 4).setValue('ยกเลิก');
+      return { success: true };
+    }
+    return { success: false, reason: 'ไม่พบรายการ' };
+  });
+}
+
+/**
+ * เจ้าของ/admin ส่งรายการขายกลับให้คนสวนแก้ตัวเลข แทนที่จะปฏิเสธทิ้งเฉยๆ
+ * ต่างจาก rejectItem() ตรงที่รายการยังอยู่ แก้ไขแล้ว submit ซ้ำได้เลย
+ * (upsertSalePendingItem จะเจอแถวนี้แล้วเขียนทับ ไม่สร้างซ้ำ)
+ * คืนค่า recorderId ให้ผู้เรียกเอาไป push แจ้งคนสวนต่อ
+ */
+function returnItemForEdit(itemId, reason) {
+  return withScriptLock(function () {
+    const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+    const data = sheet.getDataRange().getValues();
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][0]) == String(itemId) && data[i][3] === 'รออนุมัติ') {
+        sheet.getRange(i + 1, 4).setValue('ส่งกลับแก้ไข');
+        sheet.getRange(i + 1, 9).setValue(reason || '');
+        return {
+          success: true,
+          type: data[i][1],
+          roundId: data[i][2],
+          recorderId: data[i][6],
+          recorderName: data[i][5]
+        };
+      }
+    }
+    return { success: false };
+  });
+}
+
+/**
+ * รายได้ต่อต้น (ค่าประมาณ) — เฉลี่ยรายได้ของแต่ละรอบกลับไปตามสัดส่วนน้ำหนัก
+ *
+ *   รายได้ของต้น X ในรอบ = (น้ำหนักต้น X ÷ น้ำหนักรวมของรอบ) × รายได้รวมของรอบ
+ *
+ * ⚠️ เป็น "ค่าประมาณ" ไม่ใช่ตัวเลขจริงต่อต้น เพราะพอเทรวมกองแล้วคัดเกรด
+ * ไม่มีทางรู้ว่าเกรด A มาจากต้นไหน — ผู้เรียกต้องกำกับคำว่าประมาณในหน้ารายงานเสมอ
+ * (ความคลาดเคลื่อนต่ำเพราะ 1 รอบ = 1 วัน ทุเรียนสุกใกล้เคียงกัน)
+ *
+ * คืน array เรียงจากรายได้มากไปน้อย
+ */
+function getRevenueByTree(seasonId) {
+  const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  if (!sheet) return [];
+
+  const data = sheet.getDataRange().getValues();
+
+  // 1) รวมน้ำหนักรายต้นแยกตามรอบ + น้ำหนักรวมของแต่ละรอบ
+  const roundTotals = {};              // roundId -> น้ำหนักรวม
+  const byRoundTree = {};              // roundId -> { treeId -> น้ำหนัก }
+  const treeCounts = {};               // treeId -> จำนวนลูกสะสม (ทุกรอบ)
+
+  for (let i = 1; i < data.length; i++) {
+    if (seasonId && String(data[i][1]).trim() !== String(seasonId).trim()) continue;
+    if (String(data[i][4] || '').trim() !== 'ตัดขาย') continue;
+
+    const roundId = String(data[i][HARVEST_ROUND_COL] || '').trim();
+    if (!roundId) continue; // ข้อมูลเก่าก่อนมีระบบรอบ — ข้าม ไม่เดา
+
+    const treeId = String(data[i][2] || '').trim();
+    const weight = Number(data[i][6]) || 0;
+
+    roundTotals[roundId] = (roundTotals[roundId] || 0) + weight;
+    if (!byRoundTree[roundId]) byRoundTree[roundId] = {};
+    byRoundTree[roundId][treeId] = (byRoundTree[roundId][treeId] || 0) + weight;
+    treeCounts[treeId] = (treeCounts[treeId] || 0) + (Number(data[i][3]) || 0);
+  }
+
+  // 2) เฉลี่ยรายได้ของแต่ละรอบกลับไปหาต้น (อ่านชีตรอบขายครั้งเดียว)
+  const saleIndex = buildSaleRoundIndex();
+  const result = {}; // treeId -> { revenue, weight, count }
+  Object.keys(byRoundTree).forEach(function (roundId) {
+    const totalWeight = roundTotals[roundId];
+    if (!totalWeight) return; // รอบที่น้ำหนักรวมเป็น 0 หารไม่ได้ ข้ามไป
+    const roundRevenue = getSaleRoundTotals(roundId, saleIndex).revenue;
+
+    Object.keys(byRoundTree[roundId]).forEach(function (treeId) {
+      const w = byRoundTree[roundId][treeId];
+      if (!result[treeId]) result[treeId] = { treeId: treeId, revenue: 0, weight: 0, count: 0 };
+      result[treeId].revenue += (w / totalWeight) * roundRevenue;
+      result[treeId].weight += w;
+    });
+  });
+
+  return Object.keys(result)
+    .map(function (id) {
+      result[id].count = treeCounts[id] || 0;
+      result[id].revenue = Math.round(result[id].revenue * 100) / 100; // ปัดทศนิยม 2 ตำแหน่ง
+      return result[id];
+    })
+    .sort(function (a, b) { return b.revenue - a.revenue; });
+}
+
+/**
+ * แปลงข้อความหลายบรรทัดเป็นรายการเกรด
+ *   "A 60 130\nB 40 90"  ->  [{grade:'A',weight:60,price:130}, ...]
+ * คั่นด้วยช่องว่างหรือ comma ก็ได้ ข้ามบรรทัดว่าง
+ * คืน { grades } หรือ { error } (ข้อความบอกผู้ใช้ตรงๆ ว่าบรรทัดไหนผิด)
+ */
+function parseSaleGradeLines(text) {
+  const lines = String(text || '').split('\n')
+    .map(function (l) { return l.trim(); })
+    .filter(function (l) { return l !== ''; });
+
+  if (!lines.length) return { error: 'กรุณาพิมพ์อย่างน้อย 1 บรรทัด\n\nตัวอย่าง:\nA 60 130' };
+
+  const grades = [];
+  const seen = {};
+  for (let i = 0; i < lines.length; i++) {
+    const p = lines[i].replace(/,/g, ' ').split(/\s+/).filter(function (s) { return s !== ''; });
+    const label = 'บรรทัดที่ ' + (i + 1) + ' ("' + lines[i] + '")';
+
+    if (p.length < 3) return { error: label + ' ไม่ครบ 3 ค่า\n\nต้องเป็น: เกรด น้ำหนัก ราคา\nตัวอย่าง: A 60 130' };
+
+    const grade = p[0];
+    const weight = parseFloat(p[1]);
+    const price = parseFloat(p[2]);
+
+    if (isNaN(weight) || isNaN(price)) return { error: label + ' น้ำหนักหรือราคาไม่ใช่ตัวเลข' };
+    if (weight <= 0 || price <= 0) return { error: label + ' น้ำหนักและราคาต้องมากกว่า 0' };
+    if (seen[grade]) return { error: 'เกรด ' + grade + ' ซ้ำกัน 2 บรรทัด — รวมเป็นบรรทัดเดียวครับ' };
+
+    seen[grade] = true;
+    grades.push({ grade: grade, weight: weight, price: price });
+  }
+  return { grades: grades };
+}
+
+/**
+ * อ่านชีต "รอบขาย" ทั้งใบครั้งเดียว แล้วทำ map roundId -> ยอดรวม
+ *
+ * เหตุผล: ก่อนหน้านี้ getSaleRoundTotals() อ่านชีตใหม่ทุกครั้ง แต่ถูกเรียก
+ * วนต่อรอบใน getRevenueByTree/getDashboardSales/getRoundsMissingSale
+ * ฤดูกาลหนึ่ง ~60 วัน = 60 รอบ -> เปิดหน้า Dashboard ครั้งเดียวอ่านชีต
+ * เป็นร้อยรอบ ซึ่ง getValues() แพงและ GAS จำกัดเวลาทำงาน 6 นาที
+ *
+ * ผู้เรียกที่ต้องใช้หลายรอบให้เรียกอันนี้ครั้งเดียวแล้วส่ง map ต่อ
+ */
+function buildSaleRoundIndex() {
+  const sheet = SheetRepository.getSheet(SALE_ROUND_SHEET);
+  const index = {};
+  if (!sheet) return index;
+
+  const data = sheet.getDataRange().getValues();
+  for (let i = 1; i < data.length; i++) {
+    const roundId = String(data[i][0] || '').trim();
+    if (!roundId) continue;
+
+    if (!index[roundId]) index[roundId] = { roundId: roundId, revenue: 0, weight: 0, grades: [] };
+    const w = Number(data[i][3]) || 0;
+    const p = Number(data[i][4]) || 0;
+    index[roundId].revenue += Number(data[i][5]) || (w * p);
+    index[roundId].weight += w;
+    index[roundId].grades.push({ grade: String(data[i][2] || ''), weight: w, price: p });
+  }
+  return index;
+}
+
+/** ยอดขายรวมของรอบเดียว — สำหรับผู้เรียกที่ต้องการรอบเดียวจริงๆ */
+function getSaleRoundTotals(roundId, index) {
+  const empty = { roundId: roundId, revenue: 0, weight: 0, grades: [] };
+  if (!roundId) return empty;
+  const idx = index || buildSaleRoundIndex();
+  return idx[String(roundId).trim()] || empty;
+}
+
 /**
  * ข้อมูลต้นไม้สำหรับหน้าเว็บสาธารณะ (TreeInfo.html) ที่เปิดจากการสแกน QR
  * บนแท็กต้นไม้ — ไม่ต้อง login จึงให้เฉพาะข้อมูลที่เปิดเผยได้
@@ -155,9 +578,11 @@ function getTreeHistoryPublic(treeId) {
         date: fmt(when),
         sortKey: new Date(when).getTime() || 0,
         season: String(data[i][1] || ''),
-        type: String(data[i][4] || 'เก็บเกี่ยว'), // ตัดขาย / ผลเสียหาย
+        type: String(data[i][4] || 'เก็บเกี่ยว'), // ตัดขาย / เสียหาย
         quantity: Number(data[i][3]) || 0,
-        grade: String(data[i][5] || ''),
+        // เกรดมีเฉพาะข้อมูลรุ่นเก่า — แถวใหม่เกรดอยู่ในชีต "รอบขาย" ระดับวัน
+        // ไม่ใช่ระดับต้น จึงไม่แสดงเกรดในประวัติรายต้นอีกต่อไป
+        grade: String(data[i][HARVEST_ROUND_COL] || '') ? '' : String(data[i][5] || ''),
         weight: Number(data[i][6]) || 0
       });
     }
@@ -308,29 +733,56 @@ function generateNextTreeId() {
   return 'T-' + String(nextNumber).padStart(3, '0');
 }
 
+/**
+ * BUG FIX (scrutinize 2026-07-30): ทั้งฟังก์ชันนี้ไม่เคยมี Script Lock ครอบ
+ * ทั้งที่เป็น check-then-act ล้วนๆ (เช็คสถานะ 'รออนุมัติ' -> gen nextHId ด้วย
+ * อ่านแถวสุดท้าย+1 -> read-modify-write ชีต 'ผลผลิต') ถ้าเจ้าของกับ admin
+ * กด "อนุมัติ" คนละรายการพร้อมกัน (เป็นไปได้จริง เพราะระบบ push แจ้งทั้งคู่
+ * พร้อมกันตอนมีของค้าง) จะได้ ID ซ้ำใน 'การเก็บเกี่ยว' และนับน้ำหนัก/คงเหลือ
+ * ซ้ำ — จุดเดียวกับที่เคยแก้ไปแล้วใน generateNextTreeId()/CONFIRM แต่พลาด
+ * จุดนี้ไป ห่อทั้งฟังก์ชันด้วย withScriptLock() เหมือนจุดอื่นในไฟล์นี้
+ */
 function approveItem(itemId, approverName) {
+  return withScriptLock(function () {
+    return approveItemUnlocked_(itemId, approverName);
+  });
+}
+
+function approveItemUnlocked_(itemId, approverName) {
   const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
   const data = sheet.getDataRange().getValues();
-  
+
   for (let i = 1; i < data.length; i++) {
     if (data[i][0] == itemId && data[i][3] === 'รออนุมัติ') {
       sheet.getRange(i + 1, 4).setValue('อนุมัติ');
       const itemData = JSON.parse(data[i][4]);
       const type = data[i][1];
       const treeId = data[i][2]; // Now treeId comes from the queue (already generated by CONFIRM)
+      // สำหรับ type === 'บันทึกขาย' คอลัมน์นี้เก็บ roundId แทน (ดูหมายเหตุที่ upsertSalePendingItem)
       const recorderId = data[i][6];
       const recorderName = data[i][5];
       const date = data[i][7];
       const photoUrl = data[i][9];
       const seasonId = getActiveSeason();
       const approveDate = new Date();
-      
-      if (type === 'ตัดจำหน่าย') {
+
+      if (type === 'บันทึกขาย') {
+        // เรียกแกนที่ไม่ล็อกโดยตรง — ห้ามเรียก saveSaleRound() ตรงๆ เพราะ
+        // lock ไม่ reentrant (ฟังก์ชันนี้ถูกห่อ lock อยู่แล้วจากข้างบน)
+        const result = saveSaleRoundUnlocked_(itemData.roundId || treeId, itemData.grades, itemData.buyer, recorderName);
+        return { success: true, type: type, saleResult: result };
+      }
+      else if (type === 'ตัดจำหน่าย') {
         const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
         const nextHId = harvestSheet.getLastRow() > 1 ? Number(harvestSheet.getRange(harvestSheet.getLastRow(), 1).getValue()) + 1 : 1;
+        // เกรด/ราคา ปล่อยว่างเสมอในแถวใหม่ — ย้ายไปอยู่ชีต "รอบขาย" แล้ว
+        // (คอลัมน์ยังอยู่เพื่อไม่ให้ข้อมูลเก่าพัง) คอลัมน์สุดท้ายคือรหัสรอบ
+        // ใช้รอบจากตอนบันทึก ถ้าเป็นรายการเก่าที่ไม่มีให้ derive จากวันที่บันทึก
+        const roundId = itemData.roundId || getHarvestRoundId(date);
         harvestSheet.appendRow([
-          nextHId, seasonId, treeId, itemData.quantity, itemData.reason, itemData.grade,
-          itemData.weight, itemData.price, photoUrl, recorderName, recorderId, date, approveDate, approverName
+          nextHId, seasonId, treeId, itemData.quantity, itemData.reason, '',
+          itemData.weight || 0, '', photoUrl, recorderName, recorderId, date, approveDate, approverName,
+          roundId
         ]);
 
         // BUG FIX: approving a harvest (sale or damage/loss report) removes
@@ -447,22 +899,43 @@ function getDashboardByVariety(seasonId) {
   return Object.keys(result).length > 0 ? result : { 'ยังไม่มีข้อมูล': 0 };
 }
 
+/**
+ * สรุปตามเกรด — หน่วยเป็น "กิโลกรัม" ไม่ใช่จำนวนลูก
+ *
+ * เดิมอ่านเกรดจากแถวรายต้นในชีตการเก็บเกี่ยว ซึ่งเป็นตัวเลขที่ไม่ตรงความจริง
+ * (ตอนตัดยังไม่รู้เกรด ต้องเทรวมกองแล้วคัดก่อน) ตอนนี้อ่านจากชีต "รอบขาย"
+ * ซึ่งเป็นผลการคัดเกรดจริง — จึงบอกเป็น กก. ตามที่ชั่งขายจริง
+ */
 function getDashboardByGrade(seasonId) {
-  const ss = SheetRepository.getSpreadsheet();
-  const harvestSheet = ss.getSheetByName('การเก็บเกี่ยว');
-  const harvestData = harvestSheet.getDataRange().getValues();
-  
-  const result = {};
-  for (let i = 1; i < harvestData.length; i++) {
-    // index 1: รหัสฤดูกาล, index 3: จำนวนลูก, index 4: เหตุผล, index 5: เกรด
-    if (harvestData[i][1] == seasonId && harvestData[i][4] === 'ตัดขาย') {
-      const grade = harvestData[i][5] || 'ไม่ระบุ';
-      const qty = Number(harvestData[i][3]) || 0;
-      
-      if (!result[grade]) result[grade] = 0;
-      result[grade] += qty;
+  const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  const data = harvestSheet ? harvestSheet.getDataRange().getValues() : [];
+
+  const roundIds = {};
+  const legacy = {};
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1]).trim() != String(seasonId).trim()) continue;
+    if (String(data[i][4] || '').trim() !== 'ตัดขาย') continue;
+
+    const roundId = String(data[i][HARVEST_ROUND_COL] || '').trim();
+    if (roundId) {
+      roundIds[roundId] = true;
+    } else if (data[i][5]) {
+      // แถวรุ่นเก่าที่ยังมีเกรดติดอยู่ — นับเป็น กก. เพื่อให้หน่วยเดียวกัน
+      const g = String(data[i][5]);
+      legacy[g] = (legacy[g] || 0) + (Number(data[i][6]) || 0);
     }
   }
+
+  const result = {};
+  const saleIndex = buildSaleRoundIndex();
+  Object.keys(legacy).forEach(function (g) { result[g] = legacy[g]; });
+  Object.keys(roundIds).forEach(function (roundId) {
+    getSaleRoundTotals(roundId, saleIndex).grades.forEach(function (g) {
+      const key = g.grade || 'ไม่ระบุ';
+      result[key] = (result[key] || 0) + g.weight;
+    });
+  });
+
   return Object.keys(result).length > 0 ? result : { 'ยังไม่มีข้อมูล': 0 };
 }
 
@@ -505,24 +978,52 @@ function getDashboardTotal(seasonId) {
  * hardcoded mock ({ totalRevenue: 50000, totalWeight: 500 }) before; now
  * used by getDashboardTotal() to add real revenue to the overview.
  */
+/**
+ * ยอดขายรวมของฤดูกาล
+ *
+ * รายได้/น้ำหนักที่ขายได้ อ่านจากชีต "รอบขาย" (ความจริงหลังคัดเกรด)
+ * ไม่ใช่จากคอลัมน์ราคาในชีตการเก็บเกี่ยวอีกแล้ว — คอลัมน์นั้นเป็นของ
+ * ข้อมูลรุ่นเก่าก่อนแยกตาราง จึงยัง fallback ไปอ่านให้เฉพาะแถวที่ไม่มีรอบ
+ * เพื่อไม่ให้ตัวเลขย้อนหลังหายไปทั้งหมด
+ *
+ * หมายเหตุ: totalWeight (ขายได้จริง) มักน้อยกว่าน้ำหนักที่ชั่งจากสวน
+ * เพราะมีของคัดทิ้ง — เป็นเรื่องปกติ ไม่ใช่ข้อผิดพลาด
+ */
 function getDashboardSales(seasonId) {
   const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
-  const data = sheet.getDataRange().getValues();
-  let totalRevenue = 0, totalWeight = 0, totalQuantity = 0;
+  const data = sheet ? sheet.getDataRange().getValues() : [];
+
+  let totalQuantity = 0, harvestedWeight = 0;
+  let legacyRevenue = 0, legacyWeight = 0;
+  const roundIds = {};
 
   for (let i = 1; i < data.length; i++) {
-    // index 1: รหัสฤดูกาล, index 3: จำนวนลูก, index 4: เหตุผล,
-    // index 6: น้ำหนัก(กก.), index 7: ราคาต่อกก.
-    if (data[i][1] == seasonId && data[i][4] === 'ตัดขาย') {
-      const weight = Number(data[i][6]) || 0;
-      const price = Number(data[i][7]) || 0;
-      totalWeight += weight;
-      totalRevenue += weight * price;
-      totalQuantity += Number(data[i][3]) || 0;
+    if (String(data[i][1]).trim() != String(seasonId).trim()) continue;
+    if (String(data[i][4] || '').trim() !== 'ตัดขาย') continue;
+
+    totalQuantity += Number(data[i][3]) || 0;
+    harvestedWeight += Number(data[i][6]) || 0;
+
+    const roundId = String(data[i][HARVEST_ROUND_COL] || '').trim();
+    if (roundId) {
+      roundIds[roundId] = true;
+    } else {
+      // แถวรุ่นเก่า: ราคายังอยู่ในแถวเดียวกัน
+      const w = Number(data[i][6]) || 0;
+      legacyRevenue += w * (Number(data[i][7]) || 0);
+      legacyWeight += w;
     }
   }
 
-  return { totalRevenue, totalWeight, totalQuantity };
+  let totalRevenue = legacyRevenue, totalWeight = legacyWeight;
+  const saleIndex = buildSaleRoundIndex();
+  Object.keys(roundIds).forEach(function (roundId) {
+    const totals = getSaleRoundTotals(roundId, saleIndex);
+    totalRevenue += totals.revenue;
+    totalWeight += totals.weight;
+  });
+
+  return { totalRevenue, totalWeight, totalQuantity, harvestedWeight };
 }
 
 function getDashboardYearComparison() {
@@ -868,9 +1369,38 @@ function checkUserAccessWeb(sessionToken) {
   return { hasAccess: false };
 }
 
+/**
+ * debug-mantra 2026-07-30: แปลงค่าวันที่จากเซลล์ชีตให้ปลอดภัยก่อนส่งกลับผ่าน
+ * google.script.run เสมอ — เจอ console error จริง "dropping postMessage..
+ * deserialize threw error" ตามด้วย client ได้ data เป็น null (render() พังตั้งแต่
+ * บรรทัดแรกเงียบๆ ไม่มี alert ให้เห็นเลย) ต้องสงสัย Date object ที่ผิดปกติ
+ * (Invalid Date) ปนอยู่ในค่าที่ส่งกลับ เพราะ JSON.stringify(new Date(NaN))
+ * throw RangeError ตรงๆ — แปลงเป็น string ที่ serialize ได้แน่นอนไว้ก่อนเสมอ
+ * ปลอดภัยกว่าปล่อยเป็น Date object ดิบๆ ไม่ว่าจะสาเหตุจริงคืออะไร
+ */
+function safeDateStr_(v) {
+  if (!v) return '';
+  const d = (v instanceof Date) ? v : new Date(v);
+  return isNaN(d) ? '' : d.toISOString();
+}
+
 function getDashboardDataWeb(sessionToken) {
   if(!checkUserAccessWeb(sessionToken).hasAccess) throw new Error("Unauthorized");
-  
+  try {
+    return getDashboardDataWeb_(sessionToken);
+  } catch (err) {
+    logErrorToSheet('getDashboardDataWeb', 'พังตอนโหลดหน้าภาพรวม', err.toString() + (err.stack ? ' | ' + err.stack : ''));
+    // คืน object ที่ serialize ได้แน่นอนเสมอ พร้อม error message ให้ client
+    // โชว์ได้ตรงๆ แทนที่จะได้ data เป็น null แล้ว render() พังเงียบๆ แบบเดิม
+    return {
+      error: err.toString(), activeSeason: '', totalTrees: 0, pendingCount: 0,
+      variety: {}, totalExpected: 0, totalRemaining: 0, totalDamagedCount: 0,
+      totalRevenue: 0, salesData: {}, recentActivities: [], yoy: {}
+    };
+  }
+}
+
+function getDashboardDataWeb_(sessionToken) {
   const seasonId = getActiveSeason();
   const ss = SheetRepository.getSpreadsheet();
   
@@ -902,33 +1432,54 @@ function getDashboardDataWeb(sessionToken) {
   }
 
   // 3. Revenue & Sales Stats
+  // debug-mantra 2026-07-30: เดิมอ่าน harvestData[i][7] (ราคา) และ [5] (เกรด)
+  // ตรงๆ จากชีต "การเก็บเกี่ยว" — แต่ 2 คอลัมน์นี้ถูกปล่อยว่างเสมอตั้งแต่ย้าย
+  // ราคา/เกรดไปอยู่ชีต "รอบขาย" แล้ว (ดูหมายเหตุใน approveItemUnlocked_ และ
+  // getHarvestHistory) ทำให้ totalRevenue เป็น 0 เสมอ ไม่ว่าจะขายได้จริงเท่าไหร่
+  // — เปลี่ยนมาใช้ getRevenueByTree()/buildSaleRoundIndex() (แหล่งข้อมูลจริง
+  // ของโมเดลใหม่) เหมือนหน้า "รายได้" ต่อต้นที่คำนวณถูกอยู่แล้ว
   const harvestSheet = ss.getSheetByName('การเก็บเกี่ยว');
-  let totalRevenue = 0;
   let totalDamagedCount = 0;
   let salesData = { 'A/B': 0, 'C': 0, 'D': 0, 'ตกไซส์': 0 };
   let recentActivities = [];
-  
+
+  const revenueByTree = getRevenueByTree(seasonId);
+  const totalRevenue = revenueByTree.reduce(function (sum, t) { return sum + (t.revenue || 0); }, 0);
+
   if (harvestSheet) {
     const harvestData = harvestSheet.getDataRange().getValues();
+    const roundIdsThisSeason = {};
+
     for(let i=1; i<harvestData.length; i++){
       if(harvestData[i][1] == seasonId) {
         const reason = harvestData[i][4];
-        const grade = harvestData[i][5] || 'ตกไซส์';
         const qty = Number(harvestData[i][3]) || 0;
-        const price = Number(harvestData[i][7]) || 0;
-        
+
         if (reason === 'เสียหาย') {
           totalDamagedCount += qty;
         } else {
-          totalRevenue += price;
-          if (grade.includes('A') || grade.includes('B')) salesData['A/B'] += qty;
-          else if (grade.includes('C')) salesData['C'] += qty;
-          else if (grade.includes('D')) salesData['D'] += qty;
-          else salesData['ตกไซส์'] += qty;
+          const roundId = String(harvestData[i][HARVEST_ROUND_COL] || '').trim();
+          if (roundId) roundIdsThisSeason[roundId] = true;
         }
       }
     }
-    
+
+    // สัดส่วนเกรด: รวมน้ำหนักจากชีต "รอบขาย" เฉพาะรอบที่มีแถวเก็บเกี่ยวอยู่ใน
+    // season นี้ (join ผ่าน roundId เหมือน getRevenueByTree)
+    const saleIndex = buildSaleRoundIndex();
+    Object.keys(roundIdsThisSeason).forEach(function (roundId) {
+      const round = saleIndex[roundId];
+      if (!round) return;
+      round.grades.forEach(function (g) {
+        const grade = g.grade || 'ตกไซส์';
+        const w = g.weight || 0;
+        if (grade.includes('A') || grade.includes('B')) salesData['A/B'] += w;
+        else if (grade.includes('C')) salesData['C'] += w;
+        else if (grade.includes('D')) salesData['D'] += w;
+        else salesData['ตกไซส์'] += w;
+      });
+    });
+
     // Get recent 5 activities for this season
     const filteredHarvests = harvestData.slice(1).filter(r => r[1] == seasonId);
     filteredHarvests.reverse(); // Latest first
@@ -937,7 +1488,7 @@ function getDashboardDataWeb(sessionToken) {
       treeId: r[2],
       action: r[4] === 'เสียหาย' ? 'เสียหาย' : 'ตัดขาย',
       quantity: Number(r[3]),
-      date: r[11],
+      date: safeDateStr_(r[11]),
       user: r[9]
     }));
   }
@@ -1051,10 +1602,12 @@ function getHarvestHistory(seasonId, treeId, limit) {
       const approveDate = data[i][12];
       const recordDate  = data[i][11];
       records.push({
-        date:     approveDate || recordDate,
+        date:     safeDateStr_(approveDate || recordDate),
         reason:   data[i][4] || '-',
-        grade:    data[i][5] || '-',
+        // เกรดมีเฉพาะแถวรุ่นเก่า — แถวใหม่เว้นว่างเพราะย้ายไปชีต "รอบขาย" แล้ว
+        grade:    data[i][5] || '',
         quantity: Number(data[i][3]) || 0,
+        weight:   Number(data[i][6]) || 0,  // ข้อมูลหลักของโมเดลใหม่ (ชั่งทีละต้น)
         photoUrl: data[i][8] || ''
       });
     }
@@ -1105,9 +1658,9 @@ function getUsersWeb(sessionToken) {
 // ตรวจสอบ ID จริงได้ด้วย listRichMenus() ใน TestSwitch.gs
 // ==========================================
 const RICH_MENU_IDS = {
-  admin: "richmenu-6aeef5cf6cfd36b6150d498c4cd7509e",    // Admin Menu (จาก finalizeAdminMenu)
-  worker: "richmenu-36623b6970c5491f16332221a8f5eaa2",   // Worker Menu
-  customer: "richmenu-275478d29a58253eacf727ca4e00d179"  // Customer Menu (ตั้งเป็น Default ด้วย)
+  admin: "richmenu-8a9b2d14e992dce11ce80c213695d399",    // = Owner Menu (เจ้าของ/admin ใช้เมนูเดียวกัน) อัปเดต 2026-07-30
+  worker: "richmenu-f2f6626ff0a245d2b30e66adead021f1",   // Worker Menu 4 ปุ่ม รูปถูกต้อง (ใบก่อนหน้า e4b2d19b... อัปรูปผิดไฟล์ไป) อัปเดต 2026-07-30
+  customer: "richmenu-4dc8d78de7d0570e6d441eb5291ed888"  // Customer Menu (compact 2500x843) อัปเดต 2026-07-30
 };
 
 /**
@@ -1148,27 +1701,40 @@ function ensureRichMenuMatchesRole(userId, role) {
     const cache = CacheService.getScriptCache();
     const key = 'menu_role_' + userId;
     if (cache.get(key) === role) return; // ผูกตรงอยู่แล้ว ไม่ต้องยิง API
-    syncUserRichMenu(userId, role);
-    cache.put(key, role, 21600); // 6 ชม.
+    const success = syncUserRichMenu(userId, role);
+    // scrutinize 2026-07-30: เดิม cache ไว้เสมอไม่ว่า syncUserRichMenu จะสำเร็จ
+    // จริงไหม (ฟังก์ชันไม่มี return value เลย) ถ้า link ล้มเหลวแค่ครั้งเดียว
+    // (เน็ตสะดุด/LINE rate-limit ชั่วคราว) ระบบจะ "เชื่อว่าเมนูตรงแล้ว" ค้างไว้
+    // 6 ชม. เต็มโดยไม่ลองใหม่เลย ทั้งที่เมนูจริงยังไม่ได้เปลี่ยน — ตอนนี้ cache
+    // เฉพาะตอนยืนยันว่า LINE ตอบสำเร็จจริงเท่านั้น ไม่สำเร็จก็ปล่อยให้ลองใหม่
+    // ในการเรียกครั้งถัดไปทันที
+    if (success) {
+      cache.put(key, role, 21600); // 6 ชม.
+    }
   } catch (e) {
     // การ sync เมนูล้มเหลวต้องไม่ทำให้ flow หลักของผู้ใช้พัง
   }
 }
 
+/**
+ * @returns {boolean} true ถ้า LINE ตอบสำเร็จจริง (ผู้เรียกอย่าง
+ *   ensureRichMenuMatchesRole ใช้ค่านี้ตัดสินใจว่าจะ cache ผลไว้หรือไม่)
+ */
 function syncUserRichMenu(userId, role) {
   try {
     if (role === 'เจ้าของ' || role === 'admin') {
-      linkRichMenuToUser(userId, RICH_MENU_IDS.admin);
+      return linkRichMenuToUser(userId, RICH_MENU_IDS.admin);
     } else if (role === 'คนสวน') {
-      linkRichMenuToUser(userId, RICH_MENU_IDS.worker);
+      return linkRichMenuToUser(userId, RICH_MENU_IDS.worker);
     } else if (role === 'Customer') {
-      linkRichMenuToUser(userId, RICH_MENU_IDS.customer);
+      return linkRichMenuToUser(userId, RICH_MENU_IDS.customer);
     } else {
       // ไม่มี role หรืออื่นๆ ให้ใช้ Default (ซึ่งต้องตั้ง Default เป็น Customer Menu)
-      unlinkRichMenuFromUser(userId);
+      return unlinkRichMenuFromUser(userId);
     }
   } catch (err) {
     console.error("Failed to sync rich menu for " + userId + " (role=" + role + "): " + err);
+    return false;
   }
 }
 
@@ -1194,25 +1760,104 @@ function updateUserRoleWeb(targetUserId, newRole, sessionToken) {
   return false;
 }
 
+/**
+ * รายได้ต่อต้นสำหรับ Dashboard (ต้อง login)
+ * แนบ note กำกับไว้ในผลลัพธ์เลย เพื่อให้หน้าเว็บแสดงคำเตือนได้โดยไม่ลืม
+ */
+function getRevenueByTreeWeb(sessionToken) {
+  if (!checkUserAccessWeb(sessionToken).hasAccess) throw new Error("Unauthorized");
+  const seasonId = getActiveSeason();
+  const trees = getRevenueByTree(seasonId);
+
+  // ผูกชื่อสายพันธุ์เข้าไปด้วย จะได้อ่านรู้เรื่องโดยไม่ต้อง join ฝั่งหน้าเว็บ
+  const treeSheet = SheetRepository.getSheet('ต้นไม้');
+  const varietyMap = {};
+  if (treeSheet) {
+    const td = treeSheet.getDataRange().getValues();
+    for (let i = 1; i < td.length; i++) varietyMap[String(td[i][0]).trim()] = td[i][1];
+  }
+
+  return {
+    seasonId: seasonId,
+    isEstimate: true,
+    note: 'ค่าประมาณ — เฉลี่ยตามสัดส่วนน้ำหนักของแต่ละวัน เพราะหลังเทรวมกองคัดเกรดแล้วไม่สามารถระบุได้ว่าทุเรียนเกรดใดมาจากต้นใด',
+    trees: trees.map(function (t) {
+      t.variety = varietyMap[t.treeId] || '-';
+      return t;
+    })
+  };
+}
+
+/**
+ * วันที่มีการตัดขายแล้วแต่ยังไม่ได้บันทึกการขาย
+ * ใช้เตือนเจ้าของ (ผ่าน PushScheduler) — ถ้าลืมบันทึก รายได้ต่อต้นของวันนั้น
+ * จะเป็น 0 ตลอดไปโดยไม่มีใครรู้
+ */
+function getRoundsMissingSale(seasonId) {
+  const sheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  if (!sheet) return [];
+  const data = sheet.getDataRange().getValues();
+
+  const rounds = {};
+  for (let i = 1; i < data.length; i++) {
+    if (seasonId && String(data[i][1]).trim() != String(seasonId).trim()) continue;
+    if (String(data[i][4] || '').trim() !== 'ตัดขาย') continue;
+    const roundId = String(data[i][HARVEST_ROUND_COL] || '').trim();
+    if (roundId) rounds[roundId] = true;
+  }
+
+  const saleIndex = buildSaleRoundIndex();
+  return Object.keys(rounds)
+    .filter(function (roundId) { return getSaleRoundTotals(roundId, saleIndex).revenue === 0; })
+    .sort();
+}
+
 function getAllTreesWeb(sessionToken) {
   if(!checkUserAccessWeb(sessionToken).hasAccess) throw new Error("Unauthorized");
   
   const seasonId = getActiveSeason();
   const prodSheet = SheetRepository.getSheet('ผลผลิต');
   const prodData = prodSheet.getDataRange().getValues();
-  const prodMap = {}; // map treeId -> fruitCount
+  const prodMap = {}; // map treeId -> { fruitCount, totalCount, harvested }
   for(let i=1; i<prodData.length; i++) {
     if(prodData[i][1] == seasonId) {
-      prodMap[prodData[i][2]] = prodData[i][5]; // Column F: คงเหลือ (Remaining fruits)
+      prodMap[prodData[i][2]] = {
+        totalCount: Number(prodData[i][3]) || 0,  // Column D: จำนวนลูกที่คาดการณ์/ลงทะเบียนไว้
+        harvested: Number(prodData[i][4]) || 0,   // Column E: เก็บเกี่ยวแล้ว
+        fruitCount: Number(prodData[i][5]) || 0   // Column F: คงเหลือ (Remaining fruits)
+      };
+    }
+  }
+
+  // น้ำหนักรวมที่เก็บเกี่ยวไปแล้วของฤดูกาลนี้ ต่อต้น — มาจากชีต "การเก็บเกี่ยว"
+  // คอลัมน์ G (น้ำหนัก) ตรงๆ ต่างจาก fruitCount/totalCount/harvested ที่มาจาก
+  // ชีต "ผลผลิต" เพราะน้ำหนักบันทึกไว้ระดับแถวรายต้นอยู่แล้ว ไม่ต้อง join
+  // กับ "รอบขาย" เหมือนรายได้/เกรด (นับรวมทั้งตัดขายและเสียหาย เหมือน "เก็บเกี่ยว
+  // แล้ว" ในชีตผลผลิตที่นับทั้งคู่เหมือนกัน — ดู approveItemUnlocked_)
+  const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  const weightMap = {}; // treeId -> น้ำหนักรวม (กก.)
+  if (harvestSheet) {
+    const harvestData = harvestSheet.getDataRange().getValues();
+    for (let i = 1; i < harvestData.length; i++) {
+      if (harvestData[i][1] != seasonId) continue;
+      const tid = harvestData[i][2];
+      weightMap[tid] = (weightMap[tid] || 0) + (Number(harvestData[i][6]) || 0);
     }
   }
 
   const sheet = SheetRepository.getSheet('ต้นไม้');
   const data = sheet.getDataRange().getValues();
   const trees = [];
-  
+
   // index 0: ID, 1: Variety, 2: Age, 3: Lat, 4: Lng, 5: FlowerMonth, 6: Status, 7: QR, 8: Date, 9: Recorder, 10: Photo
   for(let i=1; i<data.length; i++){
+    // debug-mantra 2026-07-30: การ์ด "ผลผลิตเก็บเกี่ยว" กับแถบ "ความคืบหน้า
+    // ฤดูกาลนี้" (detailTreeTotalYield / detailProgressCount / Percent / Bar
+    // ใน Dashboard.html) ไม่เคยมี JS ที่ไหนตั้งค่าให้เลยทั้งโปรเจกต์ — เป็น UI
+    // ที่สร้างไว้แต่ไม่เคยต่อสายข้อมูลจริง เลยค้างค่า default ("-", "0", "0%")
+    // ของ HTML ตลอดมา ไม่ใช่บั๊กจากการแก้วันนี้ — เพิ่ม totalCount/harvested
+    // ที่นี่ให้ฝั่ง client เอาไปคำนวณ progress % ได้
+    const prod = prodMap[data[i][0]] || { totalCount: 0, harvested: 0, fruitCount: 0 };
     trees.push({
       id: data[i][0],
       variety: data[i][1],
@@ -1223,7 +1868,10 @@ function getAllTreesWeb(sessionToken) {
       status: data[i][6],
       qrPrinted: data[i][7] || '', // column H - last bulk-print timestamp, blank = never printed. Written by markTreesPrintedWeb() in QRGenerator.gs
       photoUrl: data[i][10] || '',
-      fruitCount: prodMap[data[i][0]] || 0
+      fruitCount: prod.fruitCount,
+      totalCount: prod.totalCount,
+      harvested: prod.harvested,
+      harvestedWeight: weightMap[data[i][0]] || 0
     });
   }
   return trees;
@@ -1340,39 +1988,84 @@ function updateTreeWeb(treeData, sessionToken) {
 
 function getIncomeDataWeb(sessionToken) {
   if(!checkUserAccessWeb(sessionToken).hasAccess) throw new Error("Unauthorized");
-  
+  try {
+    return getIncomeDataWeb_(sessionToken);
+  } catch (err) {
+    logErrorToSheet('getIncomeDataWeb', 'พังตอนโหลดหน้ารายได้', err.toString() + (err.stack ? ' | ' + err.stack : ''));
+    return { error: err.toString(), totalIncome: 0, totalVolume: 0, gradeSummary: [], items: [], yoy: {} };
+  }
+}
+
+function getIncomeDataWeb_(sessionToken) {
   const seasonId = getActiveSeason();
   const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
   if (!harvestSheet) return { totalIncome: 0, totalVolume: 0, gradeSummary: [], items: [], yoy: {} };
   
+  // รายได้อ่านจากชีต "รอบขาย" (ผลการคัดเกรดจริง) ไม่ใช่คอลัมน์ราคาในแถวรายต้น
+  // แถวใหม่จะเว้นเกรด/ราคาว่างเสมอ ถ้ายังอ่านแบบเดิมรายได้จะเป็น 0 ทั้งหน้า
+  // แถวรุ่นเก่า (ไม่มีรหัสรอบ) ยังอ่านจากคอลัมน์เดิมเพื่อไม่ให้ตัวเลขย้อนหลังหาย
   const data = harvestSheet.getDataRange().getValues();
+  const saleIndex = buildSaleRoundIndex();
+
   let totalIncome = 0;
   let totalVolume = 0;
   const gradeMap = {};
   const items = [];
-  
-  for(let i = 1; i < data.length; i++) {
-    const rowSeason = data[i][1];
-    const reason = data[i][4];
-    
-    if (rowSeason === seasonId && reason === 'ตัดขาย') {
+  const seenRounds = {};
+
+  for (let i = 1; i < data.length; i++) {
+    if (String(data[i][1]).trim() != String(seasonId).trim()) continue;
+    if (String(data[i][4] || '').trim() !== 'ตัดขาย') continue;
+
+    const roundId = String(data[i][HARVEST_ROUND_COL] || '').trim();
+
+    if (roundId) {
+      // ข้อมูลรูปแบบใหม่: 1 รายการ = 1 รอบ (ไม่ใช่ 1 ต้น) เพราะเกรด/ราคา
+      // เป็นของทั้งรอบ ไม่สามารถแยกรายต้นได้
+      if (seenRounds[roundId]) continue;
+      seenRounds[roundId] = true;
+
+      const totals = saleIndex[roundId];
+      if (!totals) continue; // รอบที่ยังไม่บันทึกขาย -> ยังไม่มีรายได้
+
+      totalIncome += totals.revenue;
+      totalVolume += totals.weight;
+
+      totals.grades.forEach(function (g) {
+        const key = g.grade || 'ไม่ระบุ';
+        const amount = g.weight * g.price;
+        if (!gradeMap[key]) gradeMap[key] = { weight: 0, total: 0 };
+        gradeMap[key].weight += g.weight;
+        gradeMap[key].total += amount;
+
+        items.push({
+          date: safeDateStr_(data[i][12] || data[i][11]),
+          roundId: roundId,
+          treeId: 'รวมทั้งรอบ (' + formatRoundIdAsDate(roundId) + ')',
+          grade: key,
+          weight: g.weight,
+          price: g.price,
+          total: amount
+        });
+      });
+    } else {
+      // ข้อมูลรุ่นเก่า: ราคาอยู่ในแถวเดียวกัน (คอลัมน์ H = ราคา/กก.)
       const weight = parseFloat(data[i][6]) || 0;
-      const price = parseFloat(data[i][7]) || 0; // price per kg or total? Usually total if it's "price", wait. The current code says: const total = weight * price;
-      // Wait, in my previous edit for Overview, I used price directly as totalRevenue! But here it says `const total = weight * price;`.
-      // Let's stick to `weight * price` if price means price per kg. But wait, in the worker form, price is just price per kg? 
-      // Actually the column is "ราคา/กก." so `weight * price` is correct for total.
+      const price = parseFloat(data[i][7]) || 0;
       const total = weight * price;
-      
+      if (total === 0 && weight === 0) continue;
+
       totalIncome += total;
       totalVolume += weight;
-      
+
       const grade = data[i][5] || 'ไม่ระบุ';
       if (!gradeMap[grade]) gradeMap[grade] = { weight: 0, total: 0 };
       gradeMap[grade].weight += weight;
       gradeMap[grade].total += total;
-      
+
       items.push({
-        date: data[i][12] || data[i][11],
+        date: safeDateStr_(data[i][12] || data[i][11]),
+        roundId: '',
         treeId: data[i][2],
         grade: grade,
         weight: weight,
@@ -1381,16 +2074,16 @@ function getIncomeDataWeb(sessionToken) {
       });
     }
   }
-  
+
   const gradeSummary = Object.keys(gradeMap).map(k => ({
     grade: k,
     weight: gradeMap[k].weight,
     avgPrice: gradeMap[k].weight > 0 ? (gradeMap[k].total / gradeMap[k].weight) : 0,
     total: gradeMap[k].total
-  })).sort((a,b) => b.total - a.total);
-  
+  })).sort((a, b) => b.total - a.total);
+
   items.sort((a, b) => new Date(b.date) - new Date(a.date));
-  
+
   return {
     totalIncome: totalIncome,
     totalVolume: totalVolume,

@@ -106,7 +106,13 @@ function resyncAllRichMenus() {
 /**
  * Diagnostic ชี้ขาด: ลอง link เมนูทั้ง 3 ตัวใน RICH_MENU_IDS ให้เจ้าของจริงๆ
  * แล้วรายงานว่า LINE ตอบอะไรกลับมา (ไม่กลืน error เหมือน syncUserRichMenu)
- * จบด้วยการ link เมนู admin คืนให้เสมอ
+ *
+ * ⚠️ ฟังก์ชันนี้ "แก้ไขข้อมูลจริง" ไม่ใช่แค่ตรวจสอบเฉยๆ — ทุกครั้งที่รัน จะ
+ * เปลี่ยนเมนูที่ผูกกับ OWNER_LINE_ID จริงบน LINE ไปเรื่อยๆ (admin -> worker ->
+ * customer ตามลำดับใน RICH_MENU_IDS) เดิมจบด้วยการบังคับ sync กลับเป็น 'เจ้าของ'
+ * เสมอ ซึ่งจะไปทับ role ที่กำลังทดสอบอยู่แบบเงียบๆ (เช่นกำลังทดสอบ 'คนสวน' อยู่
+ * แล้วเผลอรันฟังก์ชันนี้ เมนูจะถูกดีดกลับเป็น Owner Menu ทันทีโดยไม่มีคำเตือน)
+ * ตัดบรรทัดนั้นออกแล้ว — ใช้ testAsOwner() เองถ้าต้องการคืนเป็นเจ้าของ
  */
 function diagnoseRichMenuLink() {
   const myUserId = getConfig('OWNER_LINE_ID');
@@ -125,8 +131,8 @@ function diagnoseRichMenuLink() {
     Logger.log(key + ' (' + id + ') -> HTTP ' + code + (code === 200 ? ' ✅ สำเร็จ' : ' ❌ ' + res.getContentText()));
   });
 
-  syncUserRichMenu(myUserId, 'เจ้าของ');
-  Logger.log('--- คืนเมนู admin ให้เจ้าของแล้ว ---');
+  Logger.log('--- ทดสอบ link ครบทุกเมนูแล้ว (ไม่ได้คืนเป็น admin ให้อัตโนมัติ) ---');
+  Logger.log('ℹ️ ตอนนี้เมนูจริงของ ' + myUserId + ' ค้างอยู่ที่ตัวสุดท้ายที่ลิงก์ (customer) — รัน checkMyRichMenu() เพื่อดู แล้วรัน testAsOwner() ถ้าต้องการคืนเป็นเจ้าของ');
 }
 
 /**
@@ -183,5 +189,138 @@ function checkMyRichMenu() {
     Logger.log('ผูกอยู่กับ: ' + res.getContentText());
   } else {
     Logger.log('ไม่ได้ผูกเมนูส่วนตัว (ใช้ Default = Customer Menu): ' + res.getContentText());
+  }
+}
+
+/**
+ * debug-mantra 2026-07-30 (Mantra 1: Reproduce First): เช็คว่ามีรายการค้างอยู่
+ * ในคิวรออนุมัติจริงไหม ก่อนจะเดาสาเหตุที่ "ประวัติ/รายได้ไม่ขึ้น" — ทั้งการ
+ * บันทึก "ตัดขาย" (harvest) และ "บันทึกการขาย" (sale) ต้องผ่านการอนุมัติก่อน
+ * ถึงจะไปโผล่ในชีต "การเก็บเกี่ยว"/"รอบขาย" ที่หน้าประวัติ/รายได้อ่านอยู่ —
+ * ถ้ายังค้างสถานะ "รออนุมัติ"/"ส่งกลับแก้ไข" คือยังไม่ถูกอนุมัติ ไม่ใช่บั๊ก
+ */
+function listPendingQueueItems() {
+  const sheet = SheetRepository.getSheet('คิวรออนุมัติ');
+  const data = sheet.getDataRange().getValues();
+  let count = 0;
+  Logger.log('=== รายการในคิวรออนุมัติที่ยังไม่จบ (รออนุมัติ / ส่งกลับแก้ไข) ===');
+  for (let i = 1; i < data.length; i++) {
+    const status = data[i][3];
+    if (status !== 'รออนุมัติ' && status !== 'ส่งกลับแก้ไข') continue;
+    count++;
+    Logger.log('ID=' + data[i][0] + ' | ประเภท=' + data[i][1] + ' | รหัสต้น/รอบ=' + data[i][2] +
+      ' | สถานะ=' + status + ' | บันทึกโดย=' + data[i][5] + ' | วันที่=' + data[i][7] +
+      ' | ข้อมูล=' + data[i][4]);
+  }
+  if (count === 0) {
+    Logger.log('(ไม่มีรายการค้าง — ถ้ายังไม่ขึ้นประวัติ/รายได้ สาเหตุไม่ใช่รอการอนุมัติ ต้องหาสาเหตุอื่น)');
+  } else {
+    Logger.log('');
+    Logger.log('พบ ' + count + ' รายการค้างอยู่ — ถ้ารายการที่ "เพิ่งตัดขายไป" อยู่ในนี้ นั่นคือสาเหตุ:');
+    Logger.log('ยังไม่ได้กด "อนุมัติ" (เมนู "รออนุมัติ" ใน LINE หรือ Dashboard) จึงยังไม่เขียนลงชีตจริง');
+  }
+}
+
+/**
+ * debug-mantra 2026-07-30 (Mantra 3: Falsify): Dashboard ขึ้น "ฤดูกาลปัจจุบัน: -"
+ * (ว่างเปล่า) สงสัยว่า getActiveSeason() คืนค่า null (ACTIVE_SEASON ไม่เคยถูกตั้ง
+ * ใน Script Properties หลังย้ายจาก Config sheet) แล้วค่าที่ไม่ตรงกันระหว่างตอน
+ * "อนุมัติ" (เขียน seasonId ลงแถว) กับตอน "ดูรายได้" (กรองด้วย seasonId) ทำให้
+ * ข้อมูลหายไป — เช็คค่าจริงตรงๆ ทั้ง 2 ฝั่งแทนเดา
+ */
+function debugSeasonAndHarvestData() {
+  Logger.log('=== getActiveSeason() ตอนนี้คืนค่า: "' + getActiveSeason() + '" ===');
+  Logger.log('');
+
+  const harvestSheet = SheetRepository.getSheet('การเก็บเกี่ยว');
+  const hData = harvestSheet.getDataRange().getValues();
+  Logger.log('=== แถวล่าสุดในชีต "การเก็บเกี่ยว" (คอลัมน์ B = seasonId ที่บันทึกไว้จริง) ===');
+  const lastN = hData.slice(Math.max(1, hData.length - 5));
+  lastN.forEach(function (row) {
+    Logger.log('treeId=' + row[2] + ' | seasonId(B)="' + row[1] + '" | เหตุผล=' + row[4] +
+      ' | น้ำหนัก=' + row[6] + ' | roundId=' + row[14]);
+  });
+
+  Logger.log('');
+  const saleSheet = SheetRepository.getSheet(SALE_ROUND_SHEET);
+  if (saleSheet) {
+    const sData = saleSheet.getDataRange().getValues();
+    Logger.log('=== แถวล่าสุดในชีต "รอบขาย" ===');
+    sData.slice(Math.max(1, sData.length - 5)).forEach(function (row) {
+      Logger.log('roundId=' + row[0] + ' | เกรด=' + row[2] + ' | น้ำหนัก=' + row[3] + ' | รวมเงิน=' + row[5]);
+    });
+  } else {
+    Logger.log('❌ ไม่พบชีต "รอบขาย" เลย');
+  }
+
+  Logger.log('');
+  Logger.log('=== ทดสอบเรียก getRevenueByTree() ตรงๆ ด้วย seasonId ปัจจุบัน ===');
+  try {
+    const result = getRevenueByTree(getActiveSeason());
+    Logger.log('ผลลัพธ์: ' + JSON.stringify(result));
+    if (result.length === 0) {
+      Logger.log('⚠️ ได้ array ว่าง — ถ้า seasonId(B) ในชีตข้างบน "ไม่ตรง" กับ getActiveSeason() นี่คือสาเหตุ');
+    }
+  } catch (e) {
+    Logger.log('❌ getRevenueByTree() throw error: ' + e.toString());
+  }
+
+  // debug-mantra 2026-07-30 (Mantra 2: Trace the Fail Path): ภาพรวม/รายได้ ใน
+  // Dashboard ไม่ได้เรียก getRevenueByTree เลย — ทั้งคู่ใช้ getDashboardDataWeb()
+  // ตัวเดียว (Dashboard.js.html เรียก .getDashboardDataWeb() แล้วเอา
+  // data.totalRevenue/data.activeSeason ไปแสดง) ไล่ทีละท่อนแยก try/catch กัน
+  // exception จุดเดียวบังทุกอย่างที่เหลือ เหมือนที่ alert() อาจไม่เด้งใน LIFF webview
+  Logger.log('');
+  Logger.log('=== ไล่ทีละส่วนของ getDashboardDataWeb() (จำลอง logic เดียวกัน) ===');
+  try {
+    const seasonId = getActiveSeason();
+    Logger.log('1) seasonId = "' + seasonId + '"');
+
+    const ss = SheetRepository.getSpreadsheet();
+    const treeSheet = ss.getSheetByName('ต้นไม้');
+    const treeData = treeSheet.getDataRange().getValues();
+    Logger.log('2) totalTrees = ' + (treeData.length > 1 ? treeData.length - 1 : 0) + ' (แถวทั้งหมดในชีตต้นไม้ = ' + treeData.length + ')');
+
+    try {
+      const pendingCount = getPendingCount();
+      Logger.log('3) getPendingCount() = ' + pendingCount);
+    } catch (e3) {
+      Logger.log('3) ❌ getPendingCount() throw: ' + e3.toString());
+    }
+
+    try {
+      const harvestSheet = ss.getSheetByName('การเก็บเกี่ยว');
+      const harvestData = harvestSheet.getDataRange().getValues();
+      let totalRevenue = 0, matchedRows = 0;
+      for (let i = 1; i < harvestData.length; i++) {
+        if (harvestData[i][1] == seasonId) {
+          matchedRows++;
+          if (harvestData[i][4] !== 'เสียหาย') totalRevenue += Number(harvestData[i][7]) || 0;
+        }
+      }
+      Logger.log('4) harvest loop: matchedRows(season)=' + matchedRows + ' totalRevenue(จากคอลัมน์ราคาเก่า)=' + totalRevenue +
+        '  ⚠️ คอลัมน์นี้ (index 7) เป็นค่าว่างเสมอในแถวใหม่ตั้งแต่ย้ายราคาไปชีต "รอบขาย" แล้ว — totalRevenue นี้จะเป็น 0 เสมอสำหรับข้อมูลใหม่ ถึงจะมียอดขายจริงก็ตาม');
+    } catch (e4) {
+      Logger.log('4) ❌ harvest loop throw: ' + e4.toString());
+    }
+
+    try {
+      const yoy = getDashboardYearComparison();
+      Logger.log('5) getDashboardYearComparison() = ' + JSON.stringify(yoy));
+    } catch (e5) {
+      Logger.log('5) ❌ getDashboardYearComparison() throw: ' + e5.toString());
+    }
+  } catch (eOuter) {
+    Logger.log('❌ พังตั้งแต่ขั้นแรกๆ: ' + eOuter.toString());
+  }
+
+  Logger.log('');
+  Logger.log('=== ทดสอบ getHarvestHistory() ตรงๆ สำหรับ T-001 (หน้าประวัติต้นไม้) ===');
+  try {
+    const history = getHarvestHistory(getActiveSeason(), 'T-001', 10);
+    Logger.log('ผลลัพธ์: ' + JSON.stringify(history));
+    if (history.length === 0) Logger.log('⚠️ ว่างเปล่า ทั้งที่มีแถวอนุมัติแล้วของ T-001 อยู่ — ต้องดูสาเหตุแยกต่างหาก');
+  } catch (eH) {
+    Logger.log('❌ getHarvestHistory() throw: ' + eH.toString());
   }
 }

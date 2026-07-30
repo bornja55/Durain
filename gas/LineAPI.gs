@@ -148,11 +148,13 @@ function linkRichMenuToUser(userId, richMenuId) {
 /**
  * ยกเลิกการผูก Rich Menu ของผู้ใช้ (จะกลับไปใช้ Default)
  * @param {string} userId - The user ID
+ * @returns {boolean} true ถ้า LINE ตอบสำเร็จ (เดิมไม่เช็ค response เลย — ผู้เรียก
+ *   อย่าง ensureRichMenuMatchesRole ก็เลย cache "สำเร็จ" ไปทั้งที่ไม่รู้ผลจริง)
  */
 function unlinkRichMenuFromUser(userId) {
   const url = `https://api.line.me/v2/bot/user/${userId}/richmenu`;
   const token = getConfig('CHANNEL_ACCESS_TOKEN');
-  
+
   const options = {
     method: 'delete',
     headers: {
@@ -161,5 +163,12 @@ function unlinkRichMenuFromUser(userId) {
     muteHttpExceptions: true
   };
 
-  UrlFetchApp.fetch(url, options);
+  const response = UrlFetchApp.fetch(url, options);
+  if (response.getResponseCode() !== 200) {
+    logErrorToSheet('unlinkRichMenuFromUser',
+      'ยกเลิกการผูก Rich Menu ไม่สำเร็จ (HTTP ' + response.getResponseCode() + ')',
+      'userId=' + userId + ' | ' + response.getContentText());
+    return false;
+  }
+  return true;
 }

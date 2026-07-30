@@ -139,6 +139,19 @@
         // Initialize initial tabs
         DashboardVM.load();
         MapVM.init();
+
+        // Deep-link: เปิดแท็บที่ถูกส่งมาจาก URL (?page=dashboard&tab=income)
+        // ต้องเรียกตรงนี้เท่านั้น — หลังยืนยันสิทธิ์แล้วและ #app ไม่ hidden แล้ว
+        // ถ้าเรียกตอน DOM ready จะโหลดข้อมูลทั้งที่ยังไม่มี session แล้ว error
+        try {
+          const tab = (typeof INITIAL_TAB !== 'undefined' && INITIAL_TAB) ? INITIAL_TAB : '';
+          if (tab && tab !== 'overview' && document.getElementById('tab-' + tab)) {
+            NavVM.switchTab(tab);
+          }
+        } catch (e) {
+          // deep-link ล้มเหลวต้องไม่ทำให้เข้า Dashboard ไม่ได้ — ตกไปแท็บแรกตามปกติ
+          console.warn('deep-link tab failed:', e);
+        }
       } else {
         onAccessError('ไม่มีสิทธิ์เข้าถึง');
         document.getElementById('login').classList.add('hidden');
@@ -221,6 +234,20 @@
     }
 
     function render(data) {
+
+      // debug-mantra 2026-07-30: เจอ console error จริง "deserialize threw error"
+      // จาก google.script.run แล้ว data ที่ส่งมาถึง render() กลายเป็น null —
+      // render() พังตั้งแต่บรรทัดแรกเงียบๆ ไม่มี alert เตือนเลย (ต่างจาก error
+      // ปกติที่ withFailureHandler จะจับได้) หน้าจอเลยค้างที่ 0 default ของ HTML
+      // ทุกช่องโดยไม่มีร่องรอย เช็คก่อนเสมอกันพังซ้ำแบบเงียบๆ อีก
+      if (!data) {
+        alert('โหลดข้อมูลภาพรวมไม่สำเร็จ (ไม่ได้รับข้อมูลจากเซิร์ฟเวอร์ — ดู Error Log ในชีตประกอบ)');
+        return;
+      }
+      if (data.error) {
+        alert('โหลดข้อมูลภาพรวมไม่สำเร็จ: ' + data.error);
+        return;
+      }
 
       document.getElementById('valTotalTrees').textContent = data.totalTrees.toLocaleString();
       document.getElementById('valPendingCount').textContent = data.pendingCount.toLocaleString();
@@ -697,8 +724,32 @@
       document.getElementById('detailTreeTitle').textContent = t.id;
       document.getElementById('detailTreeVariety').textContent = t.variety || 'ไม่ระบุสายพันธุ์';
       document.getElementById('detailTreeAge').textContent = t.age || '0';
-      document.getElementById('detailTreeFruitCount').textContent = t.fruitCount || '0';
       document.getElementById('detailTreeFlowerMonth').textContent = t.flowerMonth || '-';
+
+      // debug-mantra 2026-07-30: การ์ด "ผลผลิตเก็บเกี่ยว" กับแถบ "ความคืบหน้า
+      // ฤดูกาลนี้" ไม่เคยมีโค้ดฝั่งนี้ตั้งค่าให้เลย (element มีอยู่ใน Dashboard.html
+      // แต่ไม่มีใครเขียน textContent ให้) เลยค้างค่า default "-"/"0"/"0%" ตลอด
+      // ทุกต้น ไม่ใช่บั๊กจากข้อมูลเสีย — getAllTreesWeb() เพิ่ม totalCount/
+      // harvested มาให้แล้ว คำนวณ % ที่นี่
+      const totalCount = Number(t.totalCount) || 0;
+      const harvested = Number(t.harvested) || 0;
+      const remaining = Number(t.fruitCount) || 0;
+      const percent = totalCount > 0 ? Math.min(100, Math.round((harvested / totalCount) * 100)) : 0;
+
+      document.getElementById('detailTreeFruitCount').textContent = totalCount > 0 ? (remaining + '/' + totalCount) : (remaining || '0');
+      const elTotalYield = document.getElementById('detailTreeTotalYield');
+      if (elTotalYield) elTotalYield.textContent = harvested;
+      const elTotalWeight = document.getElementById('detailTreeTotalWeight');
+      if (elTotalWeight) {
+        const w = Number(t.harvestedWeight) || 0;
+        elTotalWeight.textContent = w > 0 ? (w.toFixed(2) + ' กิโล') : '';
+      }
+      const elProgressCount = document.getElementById('detailProgressCount');
+      if (elProgressCount) elProgressCount.textContent = harvested;
+      const elProgressPercent = document.getElementById('detailProgressPercent');
+      if (elProgressPercent) elProgressPercent.textContent = percent + '%';
+      const elProgressBar = document.getElementById('detailProgressBar');
+      if (elProgressBar) elProgressBar.style.width = percent + '%';
 
       const latlngText = (t.lat && t.lng) ? (t.lat + ', ' + t.lng) : '-';
       document.getElementById('detailTreeLatLng').textContent = latlngText;
@@ -783,10 +834,17 @@
           }
           let html = '';
           history.forEach(h => {
-            const isSell = h.quantity > 0 && h.grade !== '-';
+            // BUG FIX: เดิมใช้ h.grade !== '-' เป็นตัวแยกว่าขายหรือเสียหาย
+            // แต่ตอนนี้เกรดย้ายไปอยู่ชีต "รอบขาย" ระดับวันแล้ว แถวใหม่จึงมี
+            // grade เป็น '-' เสมอ -> รายการตัดขายจะถูกมองว่าเป็นความเสียหายหมด
+            // ต้องดูที่ reason ซึ่งเป็นค่าที่บันทึกจริงตอนคนสวนเลือก
+            const isSell = h.reason === 'ตัดขาย';
             const icon = isSell ? '<span class="material-symbols-rounded text-green-500 bg-green-50 p-2 rounded-lg">shopping_bag</span>' : '<span class="material-symbols-rounded text-amber-500 bg-amber-50 p-2 rounded-lg">warning</span>';
             const title = isSell ? 'ตัดจำหน่าย' : 'แจ้งความเสียหาย';
-            const details = isSell ? ('เกรด: ' + h.grade) : ('เหตุผล: ' + h.reason);
+            // เกรดมีเฉพาะข้อมูลรุ่นเก่า — ถ้าไม่มีให้โชว์จำนวน/น้ำหนักแทน
+            const details = isSell
+              ? (h.grade && h.grade !== '-' ? 'เกรด: ' + h.grade : 'จำนวน: ' + h.quantity + ' ลูก')
+              : ('เหตุผล: ' + h.reason);
             const dt = new Date(h.date).toLocaleDateString('th-TH');
 
             html += '\x3Cdiv class="bg-white p-3 rounded-xl shadow-sm border border-gray-100 flex items-center gap-3"\x3E' +
@@ -1177,6 +1235,17 @@
     }
 
     function render(data) {
+
+      // debug-mantra 2026-07-30: กันพังเงียบๆ แบบเดียวกับ DashboardVM.render —
+      // ดู หมายเหตุที่นั่นสำหรับรายละเอียดเต็ม
+      if (!data) {
+        alert('โหลดข้อมูลรายได้ไม่สำเร็จ (ไม่ได้รับข้อมูลจากเซิร์ฟเวอร์ — ดู Error Log ในชีตประกอบ)');
+        return;
+      }
+      if (data.error) {
+        alert('โหลดข้อมูลรายได้ไม่สำเร็จ: ' + data.error);
+        return;
+      }
 
       document.getElementById('valTotalIncome').textContent = Number(data.totalIncome).toLocaleString();
 
